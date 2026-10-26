@@ -14,19 +14,35 @@ def ping_ip(ip):
 conn=sqlite3.connect('database.db')
 c=conn.cursor()
 
-# Build ip -> device_id map from your 9 devices table
+# Auto-detect columns for devices table
+dev_cols = [x[1] for x in c.execute("PRAGMA table_info(devices)").fetchall()]
+met_cols = [x[1] for x in c.execute("PRAGMA table_info(metrics)").fetchall()]
+print("devices columns:", dev_cols)
+print("metrics columns:", met_cols)
+
+# Find id column in devices (could be id, device_id, etc)
+id_col = None
+for cand in ["device_id","id","deviceId","ID"]:
+    if cand in dev_cols:
+        id_col = cand
+        break
+id_col = id_col or dev_cols[0]
+
+ip_col = "ip_address" if "ip_address" in dev_cols else "ip" if "ip" in dev_cols else dev_cols[1]
+name_col = "device_name" if "device_name" in dev_cols else dev_cols[0]
+
+print(f"Using devices.{id_col}, {name_col}, {ip_col}")
+
+# Build map ip -> device_id
 devices_map = {}
-for row in c.execute("SELECT id, device_name, ip_address FROM devices").fetchall():
+for row in c.execute(f"SELECT {id_col}, {name_col}, {ip_col} FROM devices").fetchall():
     did, dname, dip = row
     devices_map[dip] = did
-    # also map by name for router interfaces
     devices_map[dname] = did
-
-print(f"Found {len(devices_map)} device mappings from DB")
 
 for d in DEVICES:
     targets = []
-    if d.interfaces:
+    if getattr(d, 'interfaces', None):
         for x in d.interfaces:
             targets.append((d.name+x.service, x.ip))
     else:
@@ -34,39 +50,33 @@ for d in DEVICES:
     
     for name, ip in targets:
         up, lat = ping_ip(ip)
-        # Find device_id for this IP
-        device_id = devices_map.get(ip)
+        device_id = devices_map.get(ip) or devices_map.get(name)
         if not device_id:
-            # try find by name
-            for row in c.execute("SELECT id FROM devices WHERE device_name=?", (name,)).fetchall():
-                device_id = row[0]
-                break
+            # try lookup by ip in DB
+            try:
+                r = c.execute(f"SELECT {id_col} FROM devices WHERE {ip_col}=?", (ip,)).fetchone()
+                if r: device_id = r[0]
+            except: pass
         if not device_id:
-            print(f"Skipping {name} - no id in DB")
+            print(f"Skipping {name} {ip} - not in DB")
             continue
             
         now = datetime.datetime.now().isoformat()
         icmp = 1 if up else 0
         loss = 0 if up else 100
         
-        c.execute("INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",
-                  (device_id, now, icmp, lat, loss))
-        
-        if not up:
-            try:
-                c.execute("INSERT INTO faults(device_id,fault_type,description,timestamp) VALUES (?,?,?,?)",
-                          (device_id, "DOWN", f"{name} {ip} DOWN", now))
-            except:
-                # try other faults schema
-                try:
-                    c.execute("INSERT INTO faults(device_name,fault_type,description,timestamp) VALUES (?,?,?,?)",
-                              (name, "DOWN", f"{ip} DOWN", now))
-                except Exception as e:
-                    print(f"faults insert failed: {e}")
-        
-        print(f"[{'UP' if up else 'DOWN'}] {name} ({ip}) id={device_id} - {lat}ms -> logged to metrics")
+        # Insert with correct column names
+        try:
+            c.execute(f"INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",
+                      (device_id, now, icmp, lat, loss))
+            print(f"[{'UP' if up else 'DOWN'}] {name} ({ip}) id={device_id} {lat}ms logged")
+        except Exception as e:
+            print(f"Insert failed for {name}: {e}")
 
 conn.commit()
 print("Total metrics:", c.execute("SELECT COUNT(*) FROM metrics").fetchone()[0])
-print("Total faults:", c.execute("SELECT COUNT(*) FROM faults").fetchone()[0])
+try:
+    print("Total faults:", c.execute("SELECT COUNT(*) FROM faults").fetchone()[0])
+except:
+    pass
 conn.close()
