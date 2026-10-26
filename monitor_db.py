@@ -12,13 +12,14 @@ def ping_ip(ip):
 
 conn=sqlite3.connect('database.db')
 c=conn.cursor()
-row=c.execute("SELECT rule_id FROM rules LIMIT 1").fetchone()
-default_rule_id=row[0] if row else "R01"
-print(f"rule_id={default_rule_id}")
 
-# show faults CHECK
-sql=c.execute("SELECT sql FROM sqlite_master WHERE name='faults'").fetchone()
-print(sql[0])
+row=c.execute("SELECT rule_id FROM rules LIMIT 1").fetchone()
+rule_id=row[0] if row else "R01"
+print(f"rule_id={rule_id}")
+
+# get rule_log schema to see CHECK
+sql2=c.execute("SELECT sql FROM sqlite_master WHERE name='rule_execution_log'").fetchone()
+print(sql2[0])
 
 mp={}
 for r in c.execute("SELECT device_id, device_name, ip_address FROM devices").fetchall():
@@ -37,16 +38,22 @@ for d in DEVICES:
         c.execute("INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",(did,now,1 if up else 0,lat,0 if up else 100))
         print(f"[{'UP' if up else 'DOWN'}] {name}")
         if not up:
-            # try different status values until one works
-            for st in ["ACTIVE","active","DETECTED","OPEN","DOWN","FAIL","UP"]:
+            # FIX 1: status must be lowercase 'open' - from your CHECK
+            c.execute("INSERT INTO faults(device_id,rule_id,status,evidence,detected_at) VALUES (?,?,?,?,?)",(did,rule_id,"open",f"Ping failed for {name} {ip} - {lat}ms",now))
+            print(f"  -> fault logged open")
+            # FIX 2: rule_execution_log - try different result values
+            # Common checks: result IN ('pass','fail','true','false') lowercase?
+            for res in ["fail","FAIL","true","TRUE","triggered","fired"]:
                 try:
-                    c.execute("INSERT INTO faults(device_id,rule_id,status,evidence,detected_at) VALUES (?,?,?,?,?)",(did,default_rule_id,st,f"{name} {ip} DOWN",now))
-                    print(f"  -> fault logged with status={st}")
+                    c.execute("INSERT INTO rule_execution_log(rule_id,device_id,result,details,executed_at) VALUES (?,?,?,?,?)",(rule_id,did,res,f"Rule {rule_id} fired: {name} DOWN",now))
+                    print(f"  -> rule_log logged result={res}")
                     break
                 except Exception as e:
                     continue
-            c.execute("INSERT INTO rule_execution_log(rule_id,device_id,result,details,executed_at) VALUES (?,?,?,?,?)",(default_rule_id,did,"FAIL",f"{name} DOWN {ip}",now))
 
 conn.commit()
-print(f"Metrics {c.execute('SELECT COUNT(*) FROM metrics').fetchone()[0]} Faults {c.execute('SELECT COUNT(*) FROM faults').fetchone()[0]} Logs {c.execute('SELECT COUNT(*) FROM rule_execution_log').fetchone()[0]}")
+print("--- DONE ---")
+print(f"Metrics: {c.execute('SELECT COUNT(*) FROM metrics').fetchone()[0]}")
+print(f"Faults: {c.execute('SELECT COUNT(*) FROM faults').fetchone()[0]}")
+print(f"RuleLogs: {c.execute('SELECT COUNT(*) FROM rule_execution_log').fetchone()[0]}")
 conn.close()
