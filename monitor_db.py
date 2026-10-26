@@ -3,80 +3,61 @@ from devices import DEVICES
 
 def ping_ip(ip):
     try:
-        r = subprocess.run(["ping","-c","1","-W","1",ip], capture_output=True, text=True)
-        up = r.returncode == 0
-        m = re.search(r"time=([0-9.]+)", r.stdout)
-        lat = float(m.group(1)) if m else 0.0
-        return up, lat
+        r=subprocess.run(["ping","-c","1","-W","1",ip],capture_output=True,text=True)
+        up=r.returncode==0
+        m=re.search(r"time=([0-9.]+)",r.stdout)
+        lat=float(m.group(1)) if m else 0.0
+        return up,lat
     except:
-        return False, 0.0
+        return False,0.0
 
 conn=sqlite3.connect('database.db')
 c=conn.cursor()
 
-# Auto-detect columns for devices table
-dev_cols = [x[1] for x in c.execute("PRAGMA table_info(devices)").fetchall()]
-met_cols = [x[1] for x in c.execute("PRAGMA table_info(metrics)").fetchall()]
-print("devices columns:", dev_cols)
-print("metrics columns:", met_cols)
+# get one rule_id for faults (R01)
+row=c.execute("SELECT rule_id FROM rules LIMIT 1").fetchone()
+default_rule_id=row[0] if row else "R01_CORE_DOWN"
 
-# Find id column in devices (could be id, device_id, etc)
-id_col = None
-for cand in ["device_id","id","deviceId","ID"]:
-    if cand in dev_cols:
-        id_col = cand
-        break
-id_col = id_col or dev_cols[0]
+print(f"Using rule_id={default_rule_id} for faults")
 
-ip_col = "ip_address" if "ip_address" in dev_cols else "ip" if "ip" in dev_cols else dev_cols[1]
-name_col = "device_name" if "device_name" in dev_cols else dev_cols[0]
+mp={}
+for r in c.execute("SELECT device_id, device_name, ip_address FROM devices").fetchall():
+    did,nm,ip=r
+    mp[ip]=did
+    mp[nm]=did
 
-print(f"Using devices.{id_col}, {name_col}, {ip_col}")
-
-# Build map ip -> device_id
-devices_map = {}
-for row in c.execute(f"SELECT {id_col}, {name_col}, {ip_col} FROM devices").fetchall():
-    did, dname, dip = row
-    devices_map[dip] = did
-    devices_map[dname] = did
-
+down_list=[]
 for d in DEVICES:
-    targets = []
-    if getattr(d, 'interfaces', None):
-        for x in d.interfaces:
-            targets.append((d.name+x.service, x.ip))
-    else:
-        targets.append((d.name, d.ip))
-    
-    for name, ip in targets:
-        up, lat = ping_ip(ip)
-        device_id = devices_map.get(ip) or devices_map.get(name)
-        if not device_id:
-            # try lookup by ip in DB
-            try:
-                r = c.execute(f"SELECT {id_col} FROM devices WHERE {ip_col}=?", (ip,)).fetchone()
-                if r: device_id = r[0]
-            except: pass
-        if not device_id:
-            print(f"Skipping {name} {ip} - not in DB")
-            continue
-            
-        now = datetime.datetime.now().isoformat()
-        icmp = 1 if up else 0
-        loss = 0 if up else 100
-        
-        # Insert with correct column names
-        try:
-            c.execute(f"INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",
-                      (device_id, now, icmp, lat, loss))
-            print(f"[{'UP' if up else 'DOWN'}] {name} ({ip}) id={device_id} {lat}ms logged")
-        except Exception as e:
-            print(f"Insert failed for {name}: {e}")
+    t=[]
+    if getattr(d,'interfaces',None):
+        for x in d.interfaces: t.append((d.name+x.service,x.ip))
+    else: t.append((d.name,d.ip))
+    for name,ip in t:
+        up,lat=ping_ip(ip)
+        did=mp.get(ip) or mp.get(name)
+        if not did: continue
+        now=datetime.datetime.now().isoformat()
+        c.execute("INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",(did,now,1 if up else 0,lat,0 if up else 100))
+        print(f"[{'UP' if up else 'DOWN'}] {name} id={did} {lat}ms")
+        if not up:
+            down_list.append((did,name,ip))
+            # Insert into faults with YOUR schema: device_id, rule_id, status, evidence
+            c.execute("INSERT INTO faults(device_id,rule_id,status,evidence,detected_at) VALUES (?,?,?,?,?)",
+                      (did,default_rule_id,"OPEN",f"{name} {ip} unreachable - latency {lat}ms",now))
 
 conn.commit()
-print("Total metrics:", c.execute("SELECT COUNT(*) FROM metrics").fetchone()[0])
-try:
-    print("Total faults:", c.execute("SELECT COUNT(*) FROM faults").fetchone()[0])
-except:
-    pass
+
+# Rule execution log
+if down_list:
+    now=datetime.datetime.now().isoformat()
+    for did,name,ip in down_list:
+        c.execute("INSERT INTO rule_execution_log(rule_id,device_id,result,details,executed_at) VALUES (?,?,?,?,?)",
+                  (default_rule_id,did,"FAIL",f"Rule fired: {name} DOWN - {ip}",now))
+    conn.commit()
+    print(f"Rule {default_rule_id} fired for {len(down_list)} devices")
+
+print(f"--- FINAL COUNT ---")
+print(f"Metrics: {c.execute('SELECT COUNT(*) FROM metrics').fetchone()[0]}")
+print(f"Faults: {c.execute('SELECT COUNT(*) FROM faults').fetchone()[0]}")
+print(f"RuleLogs: {c.execute('SELECT COUNT(*) FROM rule_execution_log').fetchone()[0]}")
 conn.close()
