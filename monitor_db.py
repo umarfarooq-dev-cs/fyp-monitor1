@@ -1,7 +1,4 @@
-import sqlite3
-import datetime
-import subprocess
-import re
+import sqlite3, datetime, subprocess, re
 from devices import DEVICES
 
 def ping_ip(ip):
@@ -17,9 +14,15 @@ def ping_ip(ip):
 conn=sqlite3.connect('database.db')
 c=conn.cursor()
 
-# Check metrics columns automatically
-cols = [x[1] for x in c.execute("PRAGMA table_info(metrics)").fetchall()]
-print("metrics columns:", cols)
+# Build ip -> device_id map from your 9 devices table
+devices_map = {}
+for row in c.execute("SELECT id, device_name, ip_address FROM devices").fetchall():
+    did, dname, dip = row
+    devices_map[dip] = did
+    # also map by name for router interfaces
+    devices_map[dname] = did
+
+print(f"Found {len(devices_map)} device mappings from DB")
 
 for d in DEVICES:
     targets = []
@@ -31,31 +34,37 @@ for d in DEVICES:
     
     for name, ip in targets:
         up, lat = ping_ip(ip)
-        status = "up" if up else "down"
+        # Find device_id for this IP
+        device_id = devices_map.get(ip)
+        if not device_id:
+            # try find by name
+            for row in c.execute("SELECT id FROM devices WHERE device_name=?", (name,)).fetchall():
+                device_id = row[0]
+                break
+        if not device_id:
+            print(f"Skipping {name} - no id in DB")
+            continue
+            
         now = datetime.datetime.now().isoformat()
+        icmp = 1 if up else 0
+        loss = 0 if up else 100
         
-        # Insert into metrics - try both possible schemas
-        try:
-            if "metric_value" in cols:
-                c.execute("INSERT INTO metrics(device_name,metric_type,metric_value,timestamp) VALUES (?,?,?,?)",
-                          (name, "latency", lat, now))
-                c.execute("INSERT INTO metrics(device_name,metric_type,metric_value,timestamp) VALUES (?,?,?,?)",
-                          (name, "status", 1 if up else 0, now))
-            else:
-                # fallback if table is id, device_id, value etc
-                c.execute("INSERT INTO metrics(device_name,metric_type,metric_value,timestamp) VALUES (?,?,?,?)",
-                          (name, "latency", lat, now))
-        except Exception as e:
-            print(f"metrics insert failed for {name}: {e}")
+        c.execute("INSERT INTO metrics(device_id,timestamp,icmp_status,latency_ms,packet_loss_percent) VALUES (?,?,?,?,?)",
+                  (device_id, now, icmp, lat, loss))
         
         if not up:
             try:
-                c.execute("INSERT INTO faults(device_name,fault_type,description,timestamp) VALUES (?,?,?,?)",
-                          (name, "DOWN", f"{name} {ip} DOWN", now))
+                c.execute("INSERT INTO faults(device_id,fault_type,description,timestamp) VALUES (?,?,?,?)",
+                          (device_id, "DOWN", f"{name} {ip} DOWN", now))
             except:
-                pass
+                # try other faults schema
+                try:
+                    c.execute("INSERT INTO faults(device_name,fault_type,description,timestamp) VALUES (?,?,?,?)",
+                              (name, "DOWN", f"{ip} DOWN", now))
+                except Exception as e:
+                    print(f"faults insert failed: {e}")
         
-        print(f"[{'UP' if up else 'DOWN'}] {name} ({ip}) - {lat}ms -> logged")
+        print(f"[{'UP' if up else 'DOWN'}] {name} ({ip}) id={device_id} - {lat}ms -> logged to metrics")
 
 conn.commit()
 print("Total metrics:", c.execute("SELECT COUNT(*) FROM metrics").fetchone()[0])
