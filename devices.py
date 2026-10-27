@@ -1,7 +1,3 @@
-cd ~/fyp-monitor1
-rm devices.py
-
-cat > devices.py << 'PY'
 from dataclasses import dataclass
 from typing import List
 @dataclass
@@ -38,7 +34,3 @@ for dev in DEVICES:
     else:
         FLAT_TARGETS.append({"device":dev.name,"interface":"mgmt","vlan":dev.vlan,"ip":dev.ip,"type":dev.type})
 CHECK_INTERVAL=60; PING_COUNT=1; PING_TIMEOUT=2
-PY
-
-cat devices.py | head -10
-python3 monitor_db.py
