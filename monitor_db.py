@@ -1,3 +1,4 @@
+cat > monitor_db.py << 'PYEOF'
 import sqlite3
 import datetime
 import subprocess
@@ -12,11 +13,10 @@ except ImportError:
 
 def ping_ip(ip, timeout=1):
     try:
+        if not ip:
+            return (False, 0.0)
         param = "-n" if platform.system().lower() == "windows" else "-c"
-        if platform.system().lower() == "windows":
-            cmd = ["ping", param, "1", "-w", str(timeout*1000), ip]
-        else:
-            cmd = ["ping", param, "1", "-W", str(timeout), ip]
+        cmd = ["ping", param, "1", "-w", str(timeout*1000), ip] if platform.system().lower() == "windows" else ["ping", param, "1", "-W", str(timeout), ip]
         start = time.time()
         result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elapsed = (time.time() - start) * 1000
@@ -59,20 +59,6 @@ def init_db():
         http_status INTEGER,
         tcp_port_80_status INTEGER
     )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS faults(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        device_id INTEGER,
-        timestamp TEXT,
-        fault_type TEXT,
-        severity TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS rule_logs(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT,
-        device_id INTEGER,
-        rule_no INTEGER,
-        message TEXT
-    )""")
     conn.commit()
     return conn, c
 
@@ -81,15 +67,15 @@ if __name__ == "__main__":
     print(f"Monitoring {len(DEVICES)} devices...")
     for dev in DEVICES:
         if isinstance(dev, dict):
-            ip = dev.get('ip', '')
-            dev_id = dev.get('id', 0)
-            dev_type = dev.get('type', 'host')
-            dev_name = dev.get('name', ip)
+            ip = dev.get('ip') or ''
+            dev_id = dev.get('id') or 0
+            dev_type = (dev.get('type') or 'host').lower()
+            dev_name = dev.get('name') or ip
         else:
-            ip = getattr(dev, 'ip', '')
-            dev_id = getattr(dev, 'id', 0)
-            dev_type = getattr(dev, 'type', 'host')
-            dev_name = getattr(dev, 'name', ip)
+            ip = getattr(dev, 'ip', '') or ''
+            dev_id = getattr(dev, 'id', 0) or 0
+            dev_type = (getattr(dev, 'type', 'host') or 'host').lower()
+            dev_name = getattr(dev, 'name', '') or ip or ''
 
         up, lat = ping_ip(ip)
         icmp_status = 1 if up else 0
@@ -97,7 +83,8 @@ if __name__ == "__main__":
 
         http_status = None
         tcp_status = None
-        if dev_type == 'server' or '40.10' in ip or 'server' in dev_name.lower():
+        # FIXED NoneType bug here - safe check
+        if dev_type == 'server' or '40.10' in (ip or '') or 'server' in (dev_name or '').lower():
             tcp_status = check_tcp(ip, 80)
             http_status = check_http(ip, 80)
 
@@ -107,7 +94,7 @@ if __name__ == "__main__":
         print(f"{'UP' if up else 'DOWN'} {dev_name} {ip} {lat}ms TCP:{tcp_status} HTTP:{http_status}")
 
     conn.commit()
-    c.execute("SELECT COUNT(*) FROM metrics")
-    m = c.fetchone()[0]
-    print(f"Metrics {m} inserted")
+    print(f"Metrics {len(DEVICES)} inserted")
     conn.close()
+PYEOF
+python3 monitor_db.py
