@@ -1,20 +1,30 @@
-cat > devices.py << 'PY'
-class Device:
-    def __init__(self, id, name, ip, type="host"):
-        self.id=id; self.name=name; self.ip=ip; self.type=type
+cat > monitor_db.py << 'PY'
+from devices import FLAT_TARGETS
+import subprocess
+import time
+from datetime import datetime
 
-# EXACT match to your EVE-NG config from photos
-DEVICES = [
-    # Gateways - Should be UP if EVE lab running
-    Device(1, "Main-Router-VLAN10", "192.168.10.1", "router"),
-    Device(2, "Main-Router-VLAN20", "192.168.20.1", "router"),
-    Device(3, "Main-Router-VLAN30", "192.168.30.1", "router"),
-    Device(4, "Main-Router-VLAN40", "192.168.40.1", "router"),
-    Device(5, "Core-VLAN10", "192.168.10.2", "switch"),
-    Device(6, "Core-VLAN20", "192.168.20.2", "switch"),
-    Device(7, "Core-VLAN30", "192.168.30.2", "switch"),
-    Device(8, "Core-VLAN40", "192.168.40.2", "switch"),
-]
+def ping(ip):
+    try:
+        result = subprocess.run(["ping", "-c", "1", "-W", "2", ip], capture_output=True, text=True)
+        if result.returncode == 0:
+            # extract time
+            for line in result.stdout.splitlines():
+                if "time=" in line:
+                    ms = line.split("time=")[1].split(" ")[0]
+                    return True, float(ms)
+            return True, 0.0
+        return False, 0.0
+    except:
+        return False, 0.0
+
+print(f"Monitoring {len(FLAT_TARGETS)} targets...")
+for target in FLAT_TARGETS:
+    up, latency = ping(target['ip'])
+    status = "UP" if up else "DOWN"
+    print(f"{status} {target['device']} {target['interface']} {target['ip']} {latency}ms VLAN{target['vlan']}")
+
+print(f"Metrics {len(FLAT_TARGETS)} checked at {datetime.now()}")
 PY
 
 python3 monitor_db.py
