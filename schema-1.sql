@@ -127,7 +127,7 @@ CREATE TABLE users (
 -- Why: You suggested - Teacher may ask "When was each rule executed?"
 -- What it holds: Every time rule engine runs, log it here
 -- Simple: Debugging becomes easy - you know what happened when
-CREATE TABLE rule_execution_log (
+CREATE TABLE rule_firings (
     execution_id INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id TEXT NOT NULL, -- Which rule ran
     device_id INTEGER NOT NULL, -- On which device
@@ -144,7 +144,7 @@ CREATE INDEX idx_exec_log_time ON rule_execution_log(executed_at DESC);
 -- Why: You suggested - Separate from faults, for Flask display
 -- What it holds: Alerts for dashboard - like notification inbox
 -- Simple: Faults = technical, Alerts = user notification
-CREATE TABLE alerts (
+CREATE TABLE fault_history (
     alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id INTEGER NOT NULL,
     severity VARCHAR(10) CHECK(severity IN ('Critical','Warning','Info')),
