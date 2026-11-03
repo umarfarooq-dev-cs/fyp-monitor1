@@ -42,6 +42,27 @@ def index():
 def health():
     """For teacher to check if backend is alive"""
     return jsonify({"status": "ok", "db_exists": os.path.exists(app.config['DATABASE']), "time": datetime.now().isoformat()})
+@app.route('/api/overview')
+def api_overview():
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) as total FROM devices")
+            total = cur.fetchone()['total']
+            cur.execute("SELECT COUNT(*) as open_faults FROM fault_history WHERE status IN ('open','active')")
+            faults = cur.fetchone()['open_faults']
+            online = total - faults if total > faults else total
+            offline = faults
+            return jsonify({
+                "total": total,
+                "online": online,
+                "offline": offline,
+                "critical": faults,
+                "warning": 0
+            })
+    except Exception as e:
+        logger.error(f"/api/overview failed: {e}")
+        return jsonify({"total": 0, "online": 0, "offline": 0, "critical": 0, "warning": 0})
 
 # --- Module 2: Device Status ---
 @app.route('/api/devices')
