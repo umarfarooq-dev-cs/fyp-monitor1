@@ -3,10 +3,9 @@ import sqlite3
 import logging
 from datetime import datetime
 from contextlib import contextmanager
-from flask import Flask, jsonify, render_template, request, g
+from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 
-# Load .env
 load_dotenv()
 
 app = Flask(__name__)
@@ -14,13 +13,11 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-fallback-key-change-in-p
 app.config['DATABASE'] = os.getenv('DB_PATH', 'database.db')
 app.config['DEBUG'] = os.getenv('FLASK_ENV') != 'production'
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @contextmanager
 def get_db():
-    """Secure DB connection with auto-close - no leaks"""
     conn = None
     try:
         conn = sqlite3.connect(app.config['DATABASE'])
@@ -40,7 +37,6 @@ def index():
 
 @app.route('/health')
 def health():
-    """For teacher to check if backend is alive"""
     return jsonify({"status": "ok", "db_exists": os.path.exists(app.config['DATABASE']), "time": datetime.now().isoformat()})
 
 @app.route('/api/overview')
@@ -50,36 +46,48 @@ def api_overview():
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) as total FROM devices")
             total = cur.fetchone()['total']
-            cur.execute("SELECT COUNT(*) as online FROM devices WHERE UPPER(status)='UP'")
+            # Works for UP / Online / up / online
+            cur.execute("SELECT COUNT(*) as online FROM devices WHERE UPPER(status) IN ('UP','ONLINE','ON','1')")
             online = cur.fetchone()['online']
-            cur.execute("SELECT COUNT(*) as offline FROM devices WHERE UPPER(status)='DOWN'")
-            offline = cur.fetchone()['offline']
-            faults = offline
+            offline = total - online
             return jsonify({
                 "total": total,
                 "online": online,
                 "offline": offline,
-                "critical": faults,
+                "critical": offline,
                 "warning": 0
             })
     except Exception as e:
         logger.error(f"/api/overview failed: {e}")
         return jsonify({"total": 0, "online": 0, "offline": 0, "critical": 0, "warning": 0})
 
-# --- Module 2: Device Status ---
+# --- Module 2: Device Status - FIXED ---
 @app.route('/api/devices')
 def api_devices():
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT id, hostname, device_type, ip_address, vlan_id, status, location, last_seen
-                FROM devices ORDER BY id
-            """)
-            return jsonify([dict(r) for r in cur.fetchall()])
+            # SELECT * = never fails if a column name is different in DB
+            cur.execute("SELECT * FROM devices ORDER BY id")
+            out = []
+            for r in cur.fetchall():
+                d = dict(r)
+                # Normalize for frontend: frontend uses name + ip
+                d['name'] = d.get('hostname') or d.get('name') or d.get('device') or 'Device'
+                d['hostname'] = d.get('hostname') or d['name']
+                d['ip'] = d.get('ip_address') or d.get('ip') or d.get('address') or ''
+                d['ip_address'] = d['ip']
+                # Normalize status to UP / DOWN
+                s = str(d.get('status') or '').upper()
+                if s in ('UP', 'ONLINE', 'ON', '1', 'TRUE'):
+                    d['status'] = 'UP'
+                elif s in ('DOWN', 'OFFLINE', 'OFF', '0', 'FALSE', 'FAULT'):
+                    d['status'] = 'DOWN'
+                out.append(d)
+            return jsonify(out)
     except Exception as e:
         logger.error(f"/api/devices failed: {e}")
-        return jsonify({"error": "Failed to fetch devices"}), 500
+        return jsonify({"error": "Failed to fetch devices", "detail": str(e)}), 500
 
 # --- Module 3: Active Faults ---
 @app.route('/api/faults')
@@ -99,7 +107,7 @@ def api_faults():
             return jsonify([dict(r) for r in cur.fetchall()])
     except sqlite3.OperationalError as e:
         return jsonify({"error": f"Table missing: {e}", "hint": "Run schema-1.sql"}), 500
-        
+
 # --- Module 4: Recommendations (USP) ---
 @app.route('/api/recommendation/<rule_id>')
 def api_recommendation(rule_id):
