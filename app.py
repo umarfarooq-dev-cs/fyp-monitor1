@@ -49,10 +49,11 @@ def api_overview():
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) as total FROM devices")
             total = cur.fetchone()['total']
-            cur.execute("SELECT COUNT(*) as open_faults FROM fault_history WHERE status IN ('open','active')")
-            faults = cur.fetchone()['open_faults']
-            online = total - faults if total > faults else total
-            offline = faults
+            cur.execute("SELECT COUNT(*) as online FROM devices WHERE UPPER(status)='UP'")
+            online = cur.fetchone()['online']
+            cur.execute("SELECT COUNT(*) as offline FROM devices WHERE UPPER(status)='DOWN'")
+            offline = cur.fetchone()['offline']
+            faults = offline
             return jsonify({
                 "total": total,
                 "online": online,
@@ -113,62 +114,4 @@ def api_recommendation(rule_id):
             row = cur.fetchone()
             if row:
                 return jsonify(dict(row))
-            return jsonify({"error": "Rule not found"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# --- Module 5: History ---
-@app.route('/api/history')
-def api_history():
-    limit = request.args.get('limit', 100, type=int)
-    limit = min(max(limit, 1), 500) # Prevent abuse
-    try:
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT m.*, d.hostname as device_name 
-                FROM metrics m
-                JOIN devices d ON m.device_id = d.id
-                ORDER BY m.timestamp DESC LIMIT ?
-            """, (limit,))
-            return jsonify([dict(r) for r in cur.fetchall()])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# --- Module 6: Acknowledge ---
-@app.route('/api/fault/<int:fault_id>/acknowledge', methods=['POST'])
-def api_acknowledge(fault_id):
-    try:
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                UPDATE fault_history SET status='acknowledged', acknowledged_at=?
-                WHERE id=?
-            """, (datetime.now().isoformat(), fault_id))
-            if cur.rowcount == 0:
-                return jsonify({"error": "Fault ID not found"}), 404
-            conn.commit()
-            logger.info(f"Fault {fault_id} acknowledged")
-            return jsonify({"status": "acknowledged", "id": fault_id})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# --- Extra ---
-@app.route('/api/rules')
-def api_rules():
-    try:
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM rules ORDER BY rule_id")
-            return jsonify([dict(r) for r in cur.fetchall()])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-if __name__ == '__main__':
-    if not os.path.exists(app.config['DATABASE']):
-        logger.warning(f"DB {app.config['DATABASE']} not found! Create it first.")
-    app.run(host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
+            return jsonify({"error": "Rule not found"}),
