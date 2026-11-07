@@ -42,6 +42,7 @@ def index():
 def health():
     """For teacher to check if backend is alive"""
     return jsonify({"status": "ok", "db_exists": os.path.exists(app.config['DATABASE']), "time": datetime.now().isoformat()})
+
 @app.route('/api/overview')
 def api_overview():
     try:
@@ -87,7 +88,7 @@ def api_faults():
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT f.id, f.device_id, d.hostname as device, f.rule_id, 
+                SELECT f.id, f.device_id, d.hostname as device, f.rule_id,
                        r.severity, r.description, f.detected_at, f.status
                 FROM fault_history f
                 JOIN devices d ON f.device_id = d.id
@@ -98,11 +99,11 @@ def api_faults():
             return jsonify([dict(r) for r in cur.fetchall()])
     except sqlite3.OperationalError as e:
         return jsonify({"error": f"Table missing: {e}", "hint": "Run schema-1.sql"}), 500
-
+        
 # --- Module 4: Recommendations (USP) ---
 @app.route('/api/recommendation/<rule_id>')
 def api_recommendation(rule_id):
-    if not rule_id or len(rule_id) > 20: # Basic validation
+    if not rule_id or len(rule_id) > 20:
         return jsonify({"error": "Invalid rule_id"}), 400
     try:
         with get_db() as conn:
@@ -114,4 +115,62 @@ def api_recommendation(rule_id):
             row = cur.fetchone()
             if row:
                 return jsonify(dict(row))
-            return jsonify({"error": "Rule not found"}),
+            return jsonify({"error": "Rule not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Module 5: History ---
+@app.route('/api/history')
+def api_history():
+    limit = request.args.get('limit', 100, type=int)
+    limit = min(max(limit, 1), 500)
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT m.*, d.hostname as device_name
+                FROM metrics m
+                JOIN devices d ON m.device_id = d.id
+                ORDER BY m.timestamp DESC LIMIT ?
+            """, (limit,))
+            return jsonify([dict(r) for r in cur.fetchall()])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Module 6: Acknowledge ---
+@app.route('/api/fault/<int:fault_id>/acknowledge', methods=['POST'])
+def api_acknowledge(fault_id):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE fault_history SET status='acknowledged', acknowledged_at=?
+                WHERE id=?
+            """, (datetime.now().isoformat(), fault_id))
+            if cur.rowcount == 0:
+                return jsonify({"error": "Fault ID not found"}), 404
+            conn.commit()
+            logger.info(f"Fault {fault_id} acknowledged")
+            return jsonify({"status": "acknowledged", "id": fault_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Extra ---
+@app.route('/api/rules')
+def api_rules():
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM rules ORDER BY rule_id")
+            return jsonify([dict(r) for r in cur.fetchall()])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+if __name__ == '__main__':
+    if not os.path.exists(app.config['DATABASE']):
+        logger.warning(f"DB {app.config['DATABASE']} not found! Create it first.")
+    app.run(host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
