@@ -42,10 +42,10 @@ def main():
             (status, device_id)
         )
 
-        # If DOWN, also create a fault so dashboard shows it
+        # If DOWN, create fault with YOUR table's real columns
         if up == 0:
             cur.execute(
-                "INSERT INTO faults (device_id, fault_type, severity, status) VALUES (?, 'DOWN', 'HIGH', 'OPEN')",
+                "INSERT INTO faults (device_id, rule_id, status, evidence) VALUES (?, 'R01', 'open', 'Ping failed')",
                 (device_id,)
             )
 
@@ -54,8 +54,6 @@ def main():
     print(f"Saved {len(devices)} rows to {DB}", flush=True)
 
 if __name__ == "__main__":
-    # python3 monitor_db.py --once  = run 1 time and stop (for testing)
-    # python3 monitor_db.py         = run forever every 60 sec (for demo)
     if "--once" in sys.argv:
         main()
     else:
