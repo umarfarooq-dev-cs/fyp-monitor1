@@ -16,8 +16,12 @@ h1{font-size:32px;margin:0 0 20px 10px}
 .dot{width:12px;height:12px;border-radius:50%;background:#2dd4a0;display:inline-block;margin-right:6px}
 .card.red .dot{background:#f87171}
 .fault{border:2px solid #f87171;border-radius:12px;padding:20px;background:#2a1a2e;margin-top:10px}
+.fault h3{margin:0 0 10px;color:#f87171}
+.fault p{margin:6px 0;color:#e2e8f0}
+.fault b{color:white}
 .bottom{display:flex;justify-content:center;gap:15px;margin-top:25px;flex-wrap:wrap}
 .bottom span{background:#334155;padding:12px 30px;border-radius:30px;font-weight:bold}
+button{background:#10b981;border:0;color:white;padding:8px 16px;border-radius:20px;font-weight:bold;cursor:pointer;margin-top:10px}
 </style></head>
 <body>
 <h1>College Network Dashboard - LIVE</h1>
@@ -34,11 +38,10 @@ async function load(){
     let r = await fetch('/api/devices'); let d = await r.json();
     let list = Array.isArray(d) ? d : (d.devices || d.data || []);
     let ov=null; try{ let r2=await fetch('/api/overview'); ov=await r2.json(); }catch(e){}
-    let total=list.length, online=list.filter(x=> (x.status||x.state||'').toLowerCase().includes('on')||x.online===true||x.is_up===true).length;
+    let total=list.length, online=list.filter(x=> (x.status||'').toUpperCase()==='UP').length;
     if(ov){ total=ov.total??total; online=ov.online??online; }
     let offline=total-online;
-    let crit=list.filter(x=> (x.severity||'').toLowerCase().includes('crit')||x.critical===true).length;
-    if(ov && ov.critical!==undefined) crit=ov.critical;
+    let crit=ov?.critical ?? offline;
     document.getElementById('counts').textContent = `Total ${total} | Online ${online} | Offline ${offline}`;
     document.getElementById('total').textContent='Total: '+total;
     document.getElementById('online').textContent='Online: '+online;
@@ -46,15 +49,28 @@ async function load(){
     document.getElementById('critical').textContent=crit;
     document.getElementById('pill').textContent='LIVE STATUS - Updated '+new Date().toLocaleTimeString();
     document.getElementById('cards').innerHTML=list.map(x=>{
-      let name=x.name||x.hostname||x.device||x.ip||'Device';
-      let ip=x.ip||x.address||'';
-      let st=(x.status||x.state||(x.online?'Online':'Offline')||'').toString();
-      let isUp=st.toLowerCase().includes('on')||st.toLowerCase().includes('up');
-      return `<div class="card ${isUp?'':'red'}"><span class="dot"></span><b>${name}</b><p>${isUp?'Online':'Offline'}</p><small>${ip}</small></div>`;
+      let name=x.name||x.hostname||'Device';
+      let ip=x.ip||x.ip_address||'';
+      let isUp=(x.status||'').toUpperCase()==='UP';
+      let type=x.device_type||'';
+      return `<div class="card ${isUp?'':'red'}"><span class="dot"></span><b>${name}</b><p>${isUp?'Online':'Offline'}</p><small>${ip} ${type?'- '+type:''}</small></div>`;
     }).join('')||'No devices returned from API';
-    let off=list.filter(x=>{let s=(x.status||'').toLowerCase(); return s.includes('off')||s.includes('down')||s.includes('fault')||x.online===false});
-    document.getElementById('faults').innerHTML=off.map(x=>`<div class="fault"><b>ACTIVE FAULT: ${x.name||x.ip}</b><p>${x.reason||x.message||x.fault||'Not replying to ping'} | Rule: ${x.rule||'R01'} | ${x.severity||'Critical'}</p></div>`).join('');
-  }catch(e){ document.getElementById('cards').textContent='API Error: '+e+' - Check /api/devices in Flask'; }
+    // Faults - like PPT, with recommendation
+    let off=list.filter(x=> (x.status||'').toUpperCase()==='DOWN');
+    let html='';
+    for(let x of off){
+      let rec=null;
+      try{ let rr=await fetch('/api/recommendation/R01'); if(rr.ok) rec=await rr.json(); }catch(e){}
+      html+=`<div class="fault"><h3>ACTIVE FAULT: ${x.name||x.hostname} Not Reachable</h3>
+      <p><b>Device:</b> ${x.name} (${x.ip}) | <b>Rule:</b> R01 | <b>Severity:</b> Critical</p>
+      <p><b>WHY IT HAPPENED:</b> ${rec?.probable_cause||'Device not replying to ping - power off, cable unplugged, or interface down'}</p>
+      <p><b>HOW TO FIX IT:</b> ${rec?.recommended_action||'Check power, check cable, restart device, check switch port'}</p>
+      <p><b>HOW TO CHECK:</b> ${rec?.verification_step||'Ping '+x.ip+' after fix, check port LED'}</p>
+      <button onclick="ack(this)">Acknowledge</button></div>`;
+    }
+    document.getElementById('faults').innerHTML=html;
+  }catch(e){ document.getElementById('cards').textContent='API Error: '+e; }
 }
+function ack(b){ b.textContent='Acknowledged ✓'; b.style.background='#334155'; }
 load(); setInterval(load,5000);
 </script></body></html>
