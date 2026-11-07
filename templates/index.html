@@ -1,57 +1,60 @@
 <!DOCTYPE html>
 <html><head><title>College Network Dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{margin:0;background:#0a1a33;color:white;font-family:Arial;padding:30px}
-h1{font-size:36px;margin:0 0 20px 10px}
+h1{font-size:32px;margin:0 0 20px 10px}
 .screen{background:#0f2a4d;border:3px solid #4a6a8a;border-radius:20px;padding:20px;max-width:1000px;margin:auto}
 .top{display:flex;justify-content:space-between;align-items:center}
-.pill{background:#10b981;color:white;padding:6px 18px;border-radius:20px;font-weight:bold;font-size:13px;letter-spacing:1px}
+.pill{background:#10b981;color:white;padding:6px 18px;border-radius:20px;font-weight:bold;font-size:13px}
 .small{color:#9ab0c9;font-size:14px}
 .cards{display:flex;gap:10px;margin:20px 0;flex-wrap:wrap}
-.card{flex:1;min-width:130px;background:#14365e;border:1px solid #2dd4a0;border-radius:10px;padding:14px;text-align:left}
+.card{flex:1;min-width:140px;background:#14365e;border:1px solid #2dd4a0;border-radius:10px;padding:14px}
 .card.red{border-color:#f87171;background:#4a1a2a}
-.card b{font-size:15px}
-.card p{margin:6px 0 0;color:#2dd4a0;font-weight:bold;font-size:14px}
-.card.red p{color:#f87171}
+.card b{font-size:15px}.card p{margin:6px 0 0;color:#2dd4a0;font-weight:bold}
+.card.red p{color:#f87171}.card small{color:#9ab0c9}
 .dot{width:12px;height:12px;border-radius:50%;background:#2dd4a0;display:inline-block;margin-right:6px}
 .card.red .dot{background:#f87171}
-.fault{border:2px solid #f87171;border-radius:12px;padding:20px;display:flex;gap:40px;background:#2a1a2e;text-align:left;flex-wrap:wrap}
-.fault h3{color:#f9a8a4;font-size:13px;letter-spacing:2px;margin:0}
-.fault h2{font-size:26px;margin:10px 0 20px}
-.label{color:#9ab0c9;font-size:12px;letter-spacing:1px;margin-top:18px}
-.critical{background:#ef4444;padding:5px 18px;border-radius:20px;display:inline-block;font-weight:bold;margin-top:8px}
-.right h4{margin:18px 0 4px}
-.right .y{color:#fbbf24}.right .g{color:#2dd4a0}.right .b{color:#60a5fa}
-.right p{margin:0;color:#e5e7eb}
+.fault{border:2px solid #f87171;border-radius:12px;padding:20px;background:#2a1a2e;margin-top:10px}
 .bottom{display:flex;justify-content:center;gap:15px;margin-top:25px;flex-wrap:wrap}
-.bottom span{background:#334155;padding:12px 40px;border-radius:30px;font-weight:bold;border:1px solid #64748b}
+.bottom span{background:#334155;padding:12px 30px;border-radius:30px;font-weight:bold}
 </style></head>
 <body>
-<h1>What You Will See</h1>
+<h1>College Network Dashboard - LIVE</h1>
 <div class="screen">
-<div class="top"><span class="pill">LIVE STATUS</span><span class="small">College Network Dashboard</span></div>
-<div class="cards">
-<div class="card"><span class="dot"></span><b>Router R1</b><p>Online</p></div>
-<div class="card"><span class="dot"></span><b>Core Switch</b><p>Online</p></div>
-<div class="card"><span class="dot"></span><b>Lab PC</b><p>Online</p></div>
-<div class="card"><span class="dot"></span><b>Admin PC</b><p>Online</p></div>
-<div class="card"><span class="dot"></span><b>Library PC</b><p>Online</p></div>
-<div class="card red"><span class="dot"></span><b>Server</b><p>Fault</p></div>
+<div class="top"><span class="pill" id="pill">LIVE STATUS - Loading...</span><span class="small" id="counts"></span></div>
+<div class="cards" id="cards">Loading...</div>
+<div id="faults"></div>
 </div>
-<div class="fault">
-<div>
-<h3>ACTIVE FAULT</h3>
-<h2>Server Not Reachable</h2>
-<div style="display:flex;gap:50px"><div><div class="label">RULE</div><h2 style="margin:5px 0">R01</h2></div>
-<div><div class="label">HOW SERIOUS</div><span class="critical">Critical</span></div></div>
-</div>
-<div class="right">
-<h4 class="y">WHY IT HAPPENED</h4><p>Server is not replying</p>
-<h4 class="g">HOW TO FIX IT</h4><p>Check power, cable light, and port</p>
-<h4 class="b">HOW TO CHECK IF FIXED</h4><p>Ping server again and see if it replies</p>
-</div>
-</div>
-</div>
-<div class="bottom"><span>15 Rules</span><span>SQLite Database</span><span>Live Dashboard</span></div>
-<p style="text-align:center;color:#9ab0c9;margin-top:15px">An Explainable Rule-Based Network Fault Diagnosis System - Umar Farooq (2340) | Muhammad Ijaz (2339)</p>
-</body></html>
+<div class="bottom"><span id="total">Total: -</span><span id="online">Online: -</span><span id="offline">Offline: -</span><span>Critical: <b id="critical">-</b></span></div>
+<p style="text-align:center;color:#9ab0c9">An Explainable Rule-Based Network Fault Diagnosis System - Umar Farooq (2340) | Muhammad Ijaz (2339)</p>
+<script>
+async function load(){
+  try{
+    let r = await fetch('/api/devices'); let d = await r.json();
+    let list = Array.isArray(d) ? d : (d.devices || d.data || []);
+    let ov=null; try{ let r2=await fetch('/api/overview'); ov=await r2.json(); }catch(e){}
+    let total=list.length, online=list.filter(x=> (x.status||x.state||'').toLowerCase().includes('on')||x.online===true||x.is_up===true).length;
+    if(ov){ total=ov.total??total; online=ov.online??online; }
+    let offline=total-online;
+    let crit=list.filter(x=> (x.severity||'').toLowerCase().includes('crit')||x.critical===true).length;
+    if(ov && ov.critical!==undefined) crit=ov.critical;
+    document.getElementById('counts').textContent = `Total ${total} | Online ${online} | Offline ${offline}`;
+    document.getElementById('total').textContent='Total: '+total;
+    document.getElementById('online').textContent='Online: '+online;
+    document.getElementById('offline').textContent='Offline: '+offline;
+    document.getElementById('critical').textContent=crit;
+    document.getElementById('pill').textContent='LIVE STATUS - Updated '+new Date().toLocaleTimeString();
+    document.getElementById('cards').innerHTML=list.map(x=>{
+      let name=x.name||x.hostname||x.device||x.ip||'Device';
+      let ip=x.ip||x.address||'';
+      let st=(x.status||x.state||(x.online?'Online':'Offline')||'').toString();
+      let isUp=st.toLowerCase().includes('on')||st.toLowerCase().includes('up');
+      return `<div class="card ${isUp?'':'red'}"><span class="dot"></span><b>${name}</b><p>${isUp?'Online':'Offline'}</p><small>${ip}</small></div>`;
+    }).join('')||'No devices returned from API';
+    let off=list.filter(x=>{let s=(x.status||'').toLowerCase(); return s.includes('off')||s.includes('down')||s.includes('fault')||x.online===false});
+    document.getElementById('faults').innerHTML=off.map(x=>`<div class="fault"><b>ACTIVE FAULT: ${x.name||x.ip}</b><p>${x.reason||x.message||x.fault||'Not replying to ping'} | Rule: ${x.rule||'R01'} | ${x.severity||'Critical'}</p></div>`).join('');
+  }catch(e){ document.getElementById('cards').textContent='API Error: '+e+' - Check /api/devices in Flask'; }
+}
+load(); setInterval(load,5000);
+</script></body></html>
