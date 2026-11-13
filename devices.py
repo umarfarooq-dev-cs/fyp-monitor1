@@ -1,95 +1,44 @@
-# devices.py - Device Definitions for FYP Network Monitor
-# Matched with monitor_v2.py and seed-rules.sql
+# devices.py - FINAL - 100% Matched with EVE-NG Topology
+# Total: 1 Router + 1 Core Switch + 1 Server + 8 PCs = 11 Devices
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 @dataclass
 class Interface:
-    name: str
-    vlan: int
     ip: str
+    vlan: int
     service: str
 
 @dataclass
 class Device:
-    id: int
     name: str
-    type: str  # router / core_switch / host / server
-    ip: Optional[str] = None
-    interfaces: Optional[List[Interface]] = None
-    vlan: Optional[int] = None
+    type: str  # router, core_switch, server, host
+    ip: str
+    vlan: int
+    interfaces: list = field(default_factory=list)
 
-# Router - 4 VLAN Gateways
-ROUTER_INTERFACES = [
-    Interface("e0/0.10", 10, "192.168.10.1", "Admin-GW"),
-    Interface("e0/0.20", 20, "192.168.20.1", "Lab-GW"),
-    Interface("e0/0.30", 30, "192.168.30.1", "Library-GW"),
-    Interface("e0/0.40", 40, "192.168.40.1", "Server-GW"),
-]
-
-# Core Switch - 4 VLAN Interfaces
-CORE_INTERFACES = [
-    Interface("Vlan10", 10, "192.168.10.2", "Core-VLAN10"),
-    Interface("Vlan20", 20, "192.168.20.2", "Core-VLAN20"),
-    Interface("Vlan30", 30, "192.168.30.2", "Core-VLAN30"),
-    Interface("Vlan40", 40, "192.168.40.2", "Core-VLAN40"),
-]
-
-# Devices
 DEVICES = [
-    Device(1, "Main-Router", "router", interfaces=ROUTER_INTERFACES),
-    Device(2, "Core-Switch-SW1", "core_switch", interfaces=CORE_INTERFACES),
-    Device(3, "Admin-PC", "host", ip="192.168.10.11", vlan=10),
-    Device(4, "Lab-PC", "host", ip="192.168.20.11", vlan=20),
-    Device(5, "Library-PC", "host", ip="192.168.30.11", vlan=30),
-    Device(6, "Server-PC", "server", ip="192.168.40.11", vlan=40),
+    # 1. Router
+    Device("Main-Router", "router", "192.168.10.1", 10, [
+        Interface("192.168.10.1", 10, "Main-GW"),
+    ]),
+    # 2. Core Switch - Naam wahi rakha hai jo pehle tha
+    Device("Core-Switch-SW1", "core_switch", "192.168.10.2", 10, [
+        Interface("192.168.10.2", 10, "Core-SW"),
+    ]),
+    # 3. Server - Naam wahi rakha hai jo pehle tha
+    Device("Server-PC", "server", "192.168.40.11", 40, []),
+
+    # 4-5. Admin PCs - VLAN 10
+    Device("Admin-PC1", "host", "192.168.10.11", 10, []),
+    Device("Admin-PC2", "host", "192.168.10.12", 10, []),
+
+    # 6-9. Lab PCs - VLAN 20
+    Device("Lab-PC1", "host", "192.168.20.11", 20, []),
+    Device("Lab-PC2", "host", "192.168.20.12", 20, []),
+    Device("Lab-PC3", "host", "192.168.20.13", 20, []),
+    Device("Lab-PC4", "host", "192.168.20.14", 20, []),
+
+    # 10-11. Library PCs - VLAN 30
+    Device("Library-PC1", "host", "192.168.30.11", 30, []),
+    Device("Library-PC2", "host", "192.168.30.12", 30, []),
 ]
-
-# Flat Targets for monitor_v2.py
-FLAT_TARGETS = []
-
-for dev in DEVICES:
-    if dev.interfaces:
-        for intf in dev.interfaces:
-            if dev.type == "router":
-                flat_type = "router-interface"
-            elif dev.type == "core_switch":
-                flat_type = "core_switch"
-            else:
-                flat_type = dev.type
-
-            FLAT_TARGETS.append({
-                "device": dev.name,
-                "interface": intf.name,
-                "vlan": intf.vlan,
-                "ip": intf.ip,
-                "type": flat_type,
-                "device_type": dev.type,
-                "service": intf.service,
-            })
-    else:
-        FLAT_TARGETS.append({
-            "device": dev.name,
-            "interface": "eth0",
-            "vlan": dev.vlan,
-            "ip": dev.ip,
-            "type": dev.type,
-            "device_type": dev.type,
-            "service": f"{dev.name}-Service",
-        })
-
-# Settings - Must match rules time_window
-CHECK_INTERVAL = 60
-PING_COUNT = 3
-PING_TIMEOUT = 2
-
-# Self Check
-if __name__ == "__main__":
-    print(f"Total Targets: {len(FLAT_TARGETS)}")
-    for t in FLAT_TARGETS:
-        print(t)
-    assert len(FLAT_TARGETS) == 12, f"Error: Expected 12 targets, got {len(FLAT_TARGETS)}"
-    assert any(t["type"] == "router-interface" for t in FLAT_TARGETS), "Error: router-interface not found"
-    assert any(t["type"] == "core_switch" for t in FLAT_TARGETS), "Error: core_switch not found"
-    assert any(t["type"] == "server" for t in FLAT_TARGETS), "Error: server not found"
-    print("devices.py OK - All types matched")
