@@ -1,24 +1,31 @@
 -- ==========================================================
--- 15 Explainable Rules - All Implementable with Python Ping
--- Format matches teacher requirement Page 4
+-- 25 Explainable Rules - FINAL - Power-First + Multi-Signal
+-- ICMP + SNMP + Port Status + DNS + DHCP + Service Check
 -- ==========================================================
 
 INSERT INTO rules (rule_id, rule_name, predicate, time_window_seconds, persistence_count, severity, category, probable_cause, recommended_action, verification_step, enabled) VALUES
--- R01 to R09 = Your existing 9 rules (improved format)
-('R01', 'Gateway Unreachable', 'icmp_status=0 for 3 checks', 60, 3, 'Critical', 'Connectivity', 'Link failure or device powered off', 'Check physical cable and interface status', 'Ping gateway again: ping 192.168.x.1', 1),
-('R02', 'High Packet Loss', 'packet_loss_percent > 50', 60, 2, 'Warning', 'Performance', 'Congestion or faulty cable', 'Check interface errors and bandwidth usage', 'Run ping with 10 packets', 1),
-('R03', 'High Latency', 'latency_ms > 100', 60, 3, 'Warning', 'Performance', 'Network congestion or long route', 'Check QoS and link utilization', 'Measure latency continuously for 1 min', 1),
-('R04', 'HTTP Service Down', 'http_status != 200', 30, 2, 'Critical', 'Service', 'Web server stopped or port blocked', 'Restart HTTP service, check firewall', 'curl http://server-ip', 1),
-('R05', 'SNMP Agent Unreachable', 'snmp_cpu_percent IS NULL after request', 60, 2, 'Info', 'Service', 'SNMP disabled or community wrong', 'Enable SNMP and verify community string', 'snmpwalk -v2c -c public device_ip', 1),
-('R06', 'Core Switch Unreachable', 'device_type=core_switch AND icmp_status=0', 60, 3, 'Critical', 'Connectivity', 'Core switch failure affects all VLANs', 'Check core switch power and uplinks', 'Ping core switch management IP', 1),
-('R07', 'Server Unreachable', 'device_type=server AND icmp_status=0', 60, 3, 'Critical', 'Connectivity', 'Server down or NIC failure', 'Check server power and network config', 'Ping server from multiple VLANs', 1),
-('R08', 'Single Host Unreachable', 'device_type=pc AND icmp_status=0 AND vlan_gateway=1', 60, 3, 'Warning', 'Connectivity', 'Host-specific issue, not VLAN-wide', 'Check host firewall and IP config', 'Ping host from same VLAN', 1),
-('R09', 'Multiple VLAN Gateways Down', 'COUNT(vlan_gateway_down) >=2 in 60s', 60, 1, 'Critical', 'Correlation', 'Upstream device (Core/Router) failure', 'Check core switch and main router', 'Ping all gateways together', 1),
-
--- R10 to R15 = New 6 rules - Your suggestion - Realistic and achievable
-('R10', 'Device Recovered', 'previous_status=0 AND current_status=1', 60, 1, 'Info', 'Connectivity', 'Device came back online after failure', 'Log recovery and monitor for flapping', 'Check uptime and logs', 1),
-('R11', 'Fault Persists Long', 'fault_status=open AND duration > 300s', 300, 1, 'Critical', 'Correlation', 'Fault not resolved for 5+ minutes', 'Escalate to senior admin', 'Verify if device still down', 1),
-('R12', 'Intermittent Connectivity', 'status changes UP/DOWN >=3 in 300s', 300, 3, 'Warning', 'Correlation', 'Flapping link or unstable power', 'Check cable, duplex, interface errors', 'Monitor for 10 minutes continuously', 1),
-('R13', 'Multiple Devices Fail Together', 'COUNT(devices_down) >=3 in same 60s window', 60, 1, 'Critical', 'Correlation', 'Possible upstream or power failure', 'Check upstream router/switch and power', 'Check common upstream device', 1),
-('R14', 'Monitoring Timeout', 'no response within timeout_window', 30, 2, 'Warning', 'Performance', 'Device slow or overloaded', 'Increase timeout, check CPU', 'Ping with longer timeout', 1),
-('R15', 'Duplicate Alert Suppression', 'same fault open and new same fault detected', 60, 1, 'Info', 'Correlation', 'Same fault already reported - avoid spam', 'Suppress duplicate, update existing fault', 'Check existing open faults', 1);
+('R01', 'Gateway Unreachable', 'icmp_status=0 for 3 checks AND device_type=router', 60, 3, 'Critical', 'Connectivity', 'Device powered off OR link failure', '1. Check device power first, 2. Then check cable and switch port, 3. Then check interface status', 'Ping gateway + Check switch port LED + Check power', 1),
+('R02', 'High Packet Loss', 'packet_loss_percent > 50', 60, 2, 'Warning', 'Performance', 'Congestion or faulty cable', 'Check interface errors, port duplex, and bandwidth usage', 'Run ping with 10 packets', 1),
+('R03', 'High Latency', 'latency_ms > 100', 60, 3, 'Warning', 'Performance', 'Network congestion or long route', 'Check QoS, link utilization, and SNMP CPU', 'Measure latency continuously for 1 min', 1),
+('R04', 'HTTP Service Down - Server Only', 'device_type=server AND http_status != 200 AND icmp_status=1', 30, 2, 'Critical', 'Service', 'Web server stopped or port blocked, Server is ON', 'Restart HTTP service, check firewall port 80/443', 'curl http://server-ip', 1),
+('R05', 'SNMP Agent Unreachable', 'snmp_cpu_percent IS NULL AND icmp_status=1', 60, 2, 'Info', 'Service', 'SNMP disabled or community wrong, Device is ON', 'Enable SNMP and verify community string', 'snmpwalk -v2c -c public device_ip', 1),
+('R06', 'Core Switch Unreachable', 'device_type=core_switch AND icmp_status=0', 60, 3, 'Critical', 'Connectivity', 'Core switch power off or uplink failure', '1. Check Core Switch power first, 2. Then check uplink cable', 'Ping core switch + Check port status', 1),
+('R07', 'Server Unreachable', 'device_type=server AND icmp_status=0', 60, 3, 'Critical', 'Connectivity', 'Server powered off or NIC failure', '1. Check Server power first, 2. Then check NIC / Cable', 'Ping server from multiple VLANs + Check power LED', 1),
+('R08', 'Single Host Unreachable', 'device_type=pc AND icmp_status=0', 60, 3, 'Warning', 'Connectivity', 'Host power off OR host-specific issue, VLAN is OK', '1. Check PC power first, 2. If Power is ON, check Firewall / IP config', 'Check switch port_status + Ping host from same VLAN', 1),
+('R09', 'Multiple VLAN Gateways Down', 'COUNT(device_type=router AND icmp_status=0) >=2 in 60s', 60, 1, 'Critical', 'Correlation', 'Upstream device (Core/Router) failure', 'Check core switch power and main router', 'Ping all gateways together', 1),
+('R10', 'Device Recovered', 'previous metric icmp_status=0 AND current icmp_status=1', 60, 1, 'Info', 'Connectivity', 'Device came back online after failure', 'Log recovery and monitor for flapping', 'Check uptime and logs', 1),
+('R11', 'Fault Persists Long', 'faults.status=open AND duration > 300s', 300, 1, 'Critical', 'Correlation', 'Fault not resolved for 5+ minutes', 'Escalate to senior admin', 'Verify if device still down', 1),
+('R12', 'Intermittent Connectivity', 'icmp_status changes UP/DOWN >=3 in 300s', 300, 3, 'Warning', 'Correlation', 'Flapping link or unstable power', 'Check cable, duplex, interface errors, power fluctuation', 'Monitor for 10 minutes continuously', 1),
+('R13', 'Multiple Devices Fail Together', 'COUNT(icmp_status=0) >=3 in same 60s window', 60, 1, 'Critical', 'Correlation', 'Possible upstream or power failure', '1. Check common Power / UPS first, 2. Then check upstream router/switch', 'Check common upstream device + Power', 1),
+('R14', 'Monitoring Timeout', 'no response within timeout_window', 30, 2, 'Warning', 'Performance', 'Device slow or overloaded', 'Increase timeout, check SNMP CPU', 'Ping with longer timeout', 1),
+('R15', 'Duplicate Alert Suppression', 'same fault open and new same fault detected', 60, 1, 'Info', 'Correlation', 'Same fault already reported - avoid spam', 'Suppress duplicate, update existing fault', 'Check existing open faults', 1),
+('R16', 'Duplicate IP', 'same ip_address_assigned with 2 different mac_address in 60s', 60, 2, 'Critical', 'Connectivity', 'Two devices have same IP', '1. Change IP of one device, 2. Check DHCP pool', 'arp -a + Check MAC table in metrics', 1),
+('R17', 'DNS Failure', 'icmp_status=1 AND dns_status=0', 60, 2, 'Critical', 'Service', 'DNS server down, Ping is OK but name resolution failed', 'Check DNS server IP, restart DNS service', 'nslookup google.com', 1),
+('R18', 'DHCP Failure', 'ip_address_assigned LIKE ''169.254.%''', 60, 2, 'Critical', 'Service', 'DHCP server down or pool full', 'Check DHCP server power + Pool free addresses', 'ipconfig / Check DHCP logs', 1),
+('R19', 'High CPU on Router', 'snmp_cpu_percent > 85 for 3 checks', 60, 3, 'Warning', 'Performance', 'Router overloaded', 'Check top processes, reduce load, check broadcast storm', 'snmpwalk CPU OID', 1),
+('R20', 'Interface Flapping', 'interface_status changes UP/DOWN >=3 in 300s', 300, 3, 'Warning', 'Correlation', 'Loose cable or faulty port', 'Change port / cable, check duplex', 'Show interface status logs', 1),
+('R21', 'Inter-VLAN Slow', 'same VLAN latency OK but inter-VLAN latency > 100ms', 60, 3, 'Warning', 'Performance', 'Router / Inter-VLAN routing slow', 'Check router CPU + Inter-VLAN ACL', 'Ping same VLAN vs other VLAN', 1),
+('R22', 'Service Down but Ping UP', 'icmp_status=1 AND http_status=0 AND device_type=server', 30, 2, 'Critical', 'Service', 'Server is ON but Service is DOWN', 'Restart service, check firewall, check port listening', 'curl + systemctl status service', 1),
+('R23', 'Broadcast Storm', 'port broadcast packets very high AND latency high for many devices', 60, 2, 'Critical', 'Performance', 'Loop or faulty NIC flooding network', 'Find loop port, enable STP, disconnect faulty device', 'Check switch port counters via SNMP', 1),
+('R24', 'Wrong VLAN Assignment', 'devices.vlan_id != expected vlan_id from ip subnet', 60, 2, 'Warning', 'Connectivity', 'Port is in wrong VLAN', 'Change switch port VLAN to correct VLAN', 'Show vlan + ipconfig', 1),
+('R25', 'Repeated Login Failure', 'login_fail_count >=5 AND last_fail_at within 300s', 300, 1, 'Warning', 'Service', 'Wrong password or brute-force attempt', 'Check user, lock account temporarily, check logs', 'Check auth logs in users table', 1);
