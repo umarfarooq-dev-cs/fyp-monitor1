@@ -1,76 +1,195 @@
 <!DOCTYPE html>
-<html><head><title>College Network Dashboard</title>
+<html>
+<head>
+<title>College Network Dashboard</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{margin:0;background:#0a1a33;color:white;font-family:Arial;padding:30px}
 h1{font-size:32px;margin:0 0 20px 10px}
 .screen{background:#0f2a4d;border:3px solid #4a6a8a;border-radius:20px;padding:20px;max-width:1000px;margin:auto}
-.top{display:flex;justify-content:space-between;align-items:center}
+.top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
 .pill{background:#10b981;color:white;padding:6px 18px;border-radius:20px;font-weight:bold;font-size:13px}
+.pill.red{background:#ef4444}
 .small{color:#9ab0c9;font-size:14px}
 .cards{display:flex;gap:10px;margin:20px 0;flex-wrap:wrap}
 .card{flex:1;min-width:140px;background:#14365e;border:1px solid #2dd4a0;border-radius:10px;padding:14px}
 .card.red{border-color:#f87171;background:#4a1a2a}
+.card.warn{border-color:#fbbf24;background:#4a3a1a}
 .card b{font-size:15px}.card p{margin:6px 0 0;color:#2dd4a0;font-weight:bold}
-.card.red p{color:#f87171}.card small{color:#9ab0c9}
+.card.red p{color:#f87171}.card.warn p{color:#fbbf24}.card small{color:#9ab0c9}
 .dot{width:12px;height:12px;border-radius:50%;background:#2dd4a0;display:inline-block;margin-right:6px}
 .card.red .dot{background:#f87171}
+.card.warn .dot{background:#fbbf24}
 .fault{border:2px solid #f87171;border-radius:12px;padding:20px;background:#2a1a2e;margin-top:10px}
+.fault.warn{border-color:#fbbf24;background:#2a2a1a}
 .fault h3{margin:0 0 10px;color:#f87171}
+.fault.warn h3{color:#fbbf24}
 .fault p{margin:6px 0;color:#e2e8f0}
 .fault b{color:white}
 .bottom{display:flex;justify-content:center;gap:15px;margin-top:25px;flex-wrap:wrap}
 .bottom span{background:#334155;padding:12px 30px;border-radius:30px;font-weight:bold}
-button{background:#10b981;border:0;color:white;padding:8px 16px;border-radius:20px;font-weight:bold;cursor:pointer;margin-top:10px}
-</style></head>
+button{background:#10b981;border:0;color:white;padding:8px 16px;border-radius:20px;font-weight:bold;cursor:pointer;margin-top:10px;margin-right:8px}
+button.grey{background:#334155}
+button.red{background:#ef4444}
+.section{margin-top:20px}
+.section h2{font-size:20px;margin:0 0 10px 5px}
+.alert{border:1px solid #334155;border-radius:10px;padding:12px;margin:8px 0;background:#14365e;font-size:14px}
+.alert b{color:#fbbf24}
+.stats{display:flex;gap:10px;flex-wrap:wrap}
+.stats span{background:#14365e;border:1px solid #2dd4a0;padding:10px 18px;border-radius:10px;font-size:14px}
+</style>
+</head>
 <body>
 <h1>College Network Dashboard - LIVE</h1>
 <div class="screen">
 <div class="top"><span class="pill" id="pill">LIVE STATUS - Loading...</span><span class="small" id="counts"></span></div>
 <div class="cards" id="cards">Loading...</div>
-<div id="faults"></div>
+
+<div class="section"><h2>Active Faults - Explainable Diagnosis</h2><div id="faults">Loading faults...</div></div>
+
+<div class="section"><h2>Recent Alerts</h2><div id="alerts">Loading alerts...</div></div>
+
+<div class="section"><h2>Evaluation - Precision / Recall / F1</h2><div class="stats" id="stats">Loading stats...</div></div>
 </div>
-<div class="bottom"><span id="total">Total: -</span><span id="online">Online: -</span><span id="offline">Offline: -</span><span>Critical: <b id="critical">-</b></span></div>
+
+<div class="bottom">
+<span id="total">Total: -</span>
+<span id="online">Online: -</span>
+<span id="offline">Offline: -</span>
+<span>Critical: <b id="critical">-</b></span>
+<span>Warning: <b id="warning">-</b></span>
+</div>
 <p style="text-align:center;color:#9ab0c9">An Explainable Rule-Based Network Fault Diagnosis System - Umar Farooq (2340) | Muhammad Ijaz (2339)</p>
+
 <script>
 async function load(){
   try{
-    let r = await fetch('/api/devices'); let d = await r.json();
+    // 1. Devices
+    let r = await fetch('/api/devices');
+    let d = await r.json();
     let list = Array.isArray(d) ? d : (d.devices || d.data || []);
-    let ov=null; try{ let r2=await fetch('/api/overview'); ov=await r2.json(); }catch(e){}
-    let total=list.length, online=list.filter(x=> (x.status||'').toUpperCase()==='UP').length;
-    if(ov){ total=ov.total??total; online=ov.online??online; }
-    let offline=total-online;
-    let crit=ov?.critical ?? offline;
+
+    // 2. Overview
+    let ov = null;
+    try{ let r2 = await fetch('/api/overview'); ov = await r2.json(); }catch(e){}
+
+    let total = list.length, online = list.filter(x => (x.status||'').toUpperCase()==='UP').length;
+    if(ov){ total = ov.total ?? total; online = ov.online ?? online; }
+    let offline = total - online;
+    let crit = ov?.critical ?? offline;
+    let warn = ov?.warning ?? 0;
+
     document.getElementById('counts').textContent = `Total ${total} | Online ${online} | Offline ${offline}`;
-    document.getElementById('total').textContent='Total: '+total;
-    document.getElementById('online').textContent='Online: '+online;
-    document.getElementById('offline').textContent='Offline: '+offline;
-    document.getElementById('critical').textContent=crit;
-    document.getElementById('pill').textContent='LIVE STATUS - Updated '+new Date().toLocaleTimeString();
-    document.getElementById('cards').innerHTML=list.map(x=>{
-      let name=x.name||x.hostname||'Device';
-      let ip=x.ip||x.ip_address||'';
-      let isUp=(x.status||'').toUpperCase()==='UP';
-      let type=x.device_type||'';
-      return `<div class="card ${isUp?'':'red'}"><span class="dot"></span><b>${name}</b><p>${isUp?'Online':'Offline'}</p><small>${ip} ${type?'- '+type:''}</small></div>`;
-    }).join('')||'No devices returned from API';
-    // Faults - like PPT, with recommendation
-    let off=list.filter(x=> (x.status||'').toUpperCase()==='DOWN');
-    let html='';
-    for(let x of off){
-      let rec=null;
-      try{ let rr=await fetch('/api/recommendation/R01'); if(rr.ok) rec=await rr.json(); }catch(e){}
-      html+=`<div class="fault"><h3>ACTIVE FAULT: ${x.name||x.hostname} Not Reachable</h3>
-      <p><b>Device:</b> ${x.name} (${x.ip}) | <b>Rule:</b> R01 | <b>Severity:</b> Critical</p>
-      <p><b>WHY IT HAPPENED:</b> ${rec?.probable_cause||'Device not replying to ping - power off, cable unplugged, or interface down'}</p>
-      <p><b>HOW TO FIX IT:</b> ${rec?.recommended_action||'Check power, check cable, restart device, check switch port'}</p>
-      <p><b>HOW TO CHECK:</b> ${rec?.verification_step||'Ping '+x.ip+' after fix, check port LED'}</p>
-      <button onclick="ack(this)">Acknowledge</button></div>`;
+    document.getElementById('total').textContent = 'Total: ' + total;
+    document.getElementById('online').textContent = 'Online: ' + online;
+    document.getElementById('offline').textContent = 'Offline: ' + offline;
+    document.getElementById('critical').textContent = crit;
+    document.getElementById('warning').textContent = warn;
+
+    let pill = document.getElementById('pill');
+    pill.textContent = 'LIVE STATUS - Updated ' + new Date().toLocaleTimeString();
+    pill.className = 'pill' + (offline > 0 ? ' red' : '');
+
+    // 3. Device Cards
+    document.getElementById('cards').innerHTML = list.map(x => {
+      let name = x.name || x.hostname || 'Device';
+      let ip = x.ip || x.ip_address || '';
+      let status = (x.status || '').toUpperCase();
+      let isUp = status === 'UP';
+      let isWarn = status === 'UNKNOWN';
+      let cls = isUp ? '' : (isWarn ? 'warn' : 'red');
+      let label = isUp ? 'Online' : (isWarn ? 'Unknown' : 'Offline');
+      let type = x.device_type || '';
+      return `<div class="card ${cls}"><span class="dot"></span><b>${name}</b><p>${label}</p><small>${ip} ${type ? '- ' + type : ''}</small></div>`;
+    }).join('') || 'No devices returned from API';
+
+    // 4. FIX: Real Faults from /api/faults - Correct Rule per Device, Not Hard-coded R01
+    let faults = [];
+    try{
+      let rf = await fetch('/api/faults');
+      if(rf.ok) faults = await rf.json();
+    }catch(e){}
+
+    let html = '';
+    if(faults.length === 0){
+      html = '<p style="color:#2dd4a0">No Active Faults - All Systems Healthy</p>';
+    } else {
+      for(let f of faults){
+        let isWarn = (f.severity || '').toLowerCase() === 'warning';
+        html += `<div class="fault ${isWarn ? 'warn' : ''}">
+          <h3>ACTIVE FAULT: ${f.device} Not Reachable</h3>
+          <p><b>Device:</b> ${f.device} (${f.ip || ''}) | <b>Rule:</b> ${f.rule_id} - ${f.rule_name || ''} | <b>Severity:</b> ${f.severity || 'Critical'} | <b>Status:</b> ${f.status}</p>
+          <p><b>Detected:</b> ${f.detected_at || ''}</p>
+          <p><b>WHY IT HAPPENED:</b> ${f.probable_cause || f.description || 'Device not replying to ping'}</p>
+          <p><b>HOW TO FIX IT:</b> ${f.recommended_action || 'Check power first, then cable, then switch port'}</p>
+          <p><b>HOW TO CHECK:</b> ${f.verification_step || 'Ping device after fix, check port LED'}</p>
+          <p><b>Evidence:</b> ${f.evidence || ''}</p>
+          <button onclick="ackFault(${f.id}, this)">Acknowledge</button>
+          <button class="red" onclick="resolveFault(${f.id}, this)">Resolve</button>
+        </div>`;
+      }
     }
-    document.getElementById('faults').innerHTML=html;
-  }catch(e){ document.getElementById('cards').textContent='API Error: '+e; }
+    document.getElementById('faults').innerHTML = html;
+
+    // 5. Alerts from /api/alerts
+    let alerts = [];
+    try{
+      let ra = await fetch('/api/alerts?limit=10');
+      if(ra.ok) alerts = await ra.json();
+    }catch(e){}
+    let alertHtml = '';
+    if(alerts.length === 0){
+      alertHtml = '<p style="color:#9ab0c9">No alerts yet</p>';
+    } else {
+      alertHtml = alerts.slice(0, 5).map(a =>
+        `<div class="alert"><b>[${a.severity}] ${a.device}</b> - ${a.message} <br><small>${a.created_at} | ${a.read_status ? 'Read' : 'Unread'}</small></div>`
+      ).join('');
+    }
+    document.getElementById('alerts').innerHTML = alertHtml;
+
+    // 6. Stats from /api/stats
+    try{
+      let rs = await fetch('/api/stats');
+      if(rs.ok){
+        let s = await rs.json();
+        document.getElementById('stats').innerHTML =
+          `<span>TP: <b>${s.TP}</b></span><span>FP: <b>${s.FP}</b></span><span>TN: <b>${s.TN}</b></span><span>FN: <b>${s.FN}</b></span>` +
+          `<span>Precision: <b>${s.precision}%</b></span><span>Recall: <b>${s.recall}%</b></span><span>F1: <b>${s.f1}%</b></span>`;
+      }
+    }catch(e){}
+
+  }catch(e){ document.getElementById('cards').textContent = 'API Error: ' + e; }
 }
-function ack(b){ b.textContent='Acknowledged ✓'; b.style.background='#334155'; }
-load(); setInterval(load,5000);
-</script></body></html>
+
+// FIX: Real Acknowledge - Calls backend, updates faults table
+async function ackFault(faultId, btn){
+  try{
+    let r = await fetch(`/api/fault/${faultId}/acknowledge`, {method: 'POST'});
+    if(r.ok){
+      btn.textContent = 'Acknowledged ✓';
+      btn.className = 'grey';
+      btn.disabled = true;
+      load();
+    } else {
+      alert('Acknowledge failed');
+    }
+  }catch(e){ alert('Error: ' + e); }
+}
+
+// FIX: Real Resolve - Calls backend
+async function resolveFault(faultId, btn){
+  try{
+    let r = await fetch(`/api/fault/${faultId}/resolve`, {method: 'POST'});
+    if(r.ok){
+      btn.textContent = 'Resolved ✓';
+      load();
+    } else {
+      alert('Resolve failed');
+    }
+  }catch(e){ alert('Error: ' + e); }
+}
+
+load(); setInterval(load, 5000);
+</script>
+</body>
+  </html>
