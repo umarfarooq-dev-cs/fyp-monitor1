@@ -1,4 +1,4 @@
-# devices.py - FINAL - 100% Matched with EVE-NG Topology
+# devices.py - FINAL FIXED - Works with insert.py + monitor_v2.py + app.py
 # Total: 1 Router + 1 Core Switch + 1 Server + 8 PCs = 11 Devices
 from dataclasses import dataclass, field
 
@@ -11,18 +11,34 @@ class Interface:
 @dataclass
 class Device:
     name: str
-    type: str  # router, core_switch, server, host
+    type: str
     ip: str
     vlan: int
     interfaces: list = field(default_factory=list)
 
+    # --- YE 2 CHEEZEN ISILIYE ADD KI HAIN TAAKE monitor_v2.py KABHI ERROR NA DE ---
+    # monitor_v2.py t.get("type") karta hai, isliye Device ko bhi .get() de diya
+    def get(self, key, default=None):
+        # name, ip, type, vlan sab ko dict jaisa bana diya
+        mapping = {
+            "name": self.name,
+            "device_name": self.name,
+            "ip": self.ip,
+            "ip_address": self.ip,
+            "type": self.type,
+            "device_type": self.type,
+            "vlan": self.vlan,
+            "vlan_id": self.vlan,
+            "location": self.name,
+        }
+        return mapping.get(key, default)
+
+    def __getitem__(self, key):
+        return self.get(key)
+
 DEVICES = [
-    Device("Main-Router", "router", "192.168.10.1", 10, [
-        Interface("192.168.10.1", 10, "Main-GW"),
-    ]),
-    Device("Core-Switch-SW1", "core_switch", "192.168.10.2", 10, [
-        Interface("192.168.10.2", 10, "Core-SW"),
-    ]),
+    Device("Main-Router", "router", "192.168.10.1", 10, [Interface("192.168.10.1", 10, "Main-GW")]),
+    Device("Core-Switch-SW1", "core_switch", "192.168.10.2", 10, [Interface("192.168.10.2", 10, "Core-SW")]),
     Device("Server-PC", "server", "192.168.40.11", 40, []),
     Device("Admin-PC1", "host", "192.168.10.11", 10, []),
     Device("Admin-PC2", "host", "192.168.10.12", 10, []),
@@ -34,6 +50,18 @@ DEVICES = [
     Device("Library-PC2", "host", "192.168.30.12", 30, []),
 ]
 
-# --- YE LINE MISSING THI, ISILIYE ERROR AA RAHA THA ---
-# monitor_v2.py isi ko import karta hai
-FLAT_TARGETS = DEVICES
+# monitor_v2.py ke liye - dict wali list
+FLAT_TARGETS = [
+    {
+        "name": d.name,
+        "device_name": d.name,
+        "ip": d.ip,
+        "ip_address": d.ip,
+        "type": d.type,
+        "device_type": d.type,
+        "vlan": d.vlan,
+        "vlan_id": d.vlan,
+        "location": d.name,
+    }
+    for d in DEVICES
+]
