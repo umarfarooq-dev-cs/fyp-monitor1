@@ -16,13 +16,12 @@ class Device:
     vlan: int
     interfaces: list = field(default_factory=list)
 
-    # --- YE 2 CHEEZEN ISILIYE ADD KI HAIN TAAKE monitor_v2.py KABHI ERROR NA DE ---
-    # monitor_v2.py t.get("type") karta hai, isliye Device ko bhi .get() de diya
     def get(self, key, default=None):
-        # name, ip, type, vlan sab ko dict jaisa bana diya
         mapping = {
+            "device": self.name,
             "name": self.name,
             "device_name": self.name,
+            "host": self.name,
             "ip": self.ip,
             "ip_address": self.ip,
             "type": self.type,
@@ -30,6 +29,7 @@ class Device:
             "vlan": self.vlan,
             "vlan_id": self.vlan,
             "location": self.name,
+            "interface": "",
         }
         return mapping.get(key, default)
 
@@ -50,11 +50,13 @@ DEVICES = [
     Device("Library-PC2", "host", "192.168.30.12", 30, []),
 ]
 
-# monitor_v2.py ke liye - dict wali list
+# monitor_v2.py ke liye - isko 'device' key chahiye thi, isliye ye add ki
 FLAT_TARGETS = [
     {
+        "device": d.name,
         "name": d.name,
         "device_name": d.name,
+        "host": d.name,
         "ip": d.ip,
         "ip_address": d.ip,
         "type": d.type,
@@ -62,6 +64,7 @@ FLAT_TARGETS = [
         "vlan": d.vlan,
         "vlan_id": d.vlan,
         "location": d.name,
+        "interface": "",
     }
     for d in DEVICES
 ]
