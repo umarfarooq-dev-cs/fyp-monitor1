@@ -378,9 +378,9 @@ def main():
             if device_type == "pc" and ip not in arp_table:
                 create_or_update_fault(cur, device_id, "R05", f"PC {name} UP but not in ARP - IP {ip} not assigned / DHCP failed", f"[R05-Warning] {name} DHCP Failed - No ARP entry", "Warning")
                 log_rule_firing(cur, "R05", device_id, "fired", "No ARP entry")
-                        else:
-                if device_type == "pc":
-                    resolve_single_fault(cur, device_id, "R05")
+             else:
+            if device_type == "pc":
+                 resolve_single_fault(cur, device_id, "R05")
             # R25 - Config Change - sirf jab flap hua ho tabhi log karo, har bar nahi
             if prev.get("flaps", 0) > 0:
                 log_rule_firing(cur, "R25", device_id, "checked", f"Config/State change detected - status flapped")
