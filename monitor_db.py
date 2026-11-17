@@ -195,7 +195,11 @@ def main():
         UNIQUE(device_id, hour_start))""")
     cur.execute("PRAGMA table_info(metrics)")
     cols = [r[1] for r in cur.fetchall()]
+    if "port_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")# Naya wala - SAHI
+try:
     if "port_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")
+except Exception:
+    pass
     if "dns_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN dns_status INTEGER")
     if "ip_address_assigned" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN ip_address_assigned TEXT")
 
