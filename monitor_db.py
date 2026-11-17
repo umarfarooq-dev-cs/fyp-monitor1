@@ -1,4 +1,4 @@
-# monitor_db.py - Database Monitor + Rule Engine (DB Version)
+# Database Monitor + Rule Engine (DB Version)
 # FINAL FIXED: R01 to R25 - ALL RULES + 3 LOGIC BUGS FIXED
 # FIXED: EVE-NG Lab - Auto Interface + Gateway 192.168.10.1 + Syntax Fix
 import subprocess
@@ -105,8 +105,6 @@ def check_snmp_cpu(ip):
     return check_snmp_value(ip, "1.3.6.1.2.1.25.3.3.1.2")
 
 def check_snmp_mem_percent(ip):
-    # FIXED: Pehle wala OID bytes deta tha, % nahi. Ab Used aur Total dono le ke % nikalte hain.
-    # Agar SNMP na mile to None, fault nahi banega, safe hai.
     try:
         used = check_snmp_value(ip, "1.3.6.1.2.1.25.2.3.1.6.1")
         total = check_snmp_value(ip, "1.3.6.1.2.1.25.2.3.1.5.1")
@@ -153,15 +151,14 @@ def log_rule_firing(cursor, rule_id, device_id, result, details):
 def create_or_update_fault(cursor, device_id, rule_id, evidence, message, severity="Critical"):
     cursor.execute("SELECT fault_id FROM faults WHERE device_id = ? AND rule_id = ? AND status = 'open'", (device_id, rule_id))
     if cursor.fetchone():
-        # R15 - Duplicate suppression
-        log_rule_firing(cursor, "R15", device_id, "suppressed", f"Duplicate {rule_id} suppressed, fault already open")
+        # R15 - Duplicate suppression - FIXED: DB CHECK sirf fired/resolved allow karta hai
+        log_rule_firing(cursor, "R15", device_id, "fired", f"Duplicate {rule_id} suppressed, fault already open")
         return False
     cursor.execute("INSERT INTO faults (device_id, rule_id, status, evidence) VALUES (?, ?, 'open', ?)", (device_id, rule_id, evidence))
     cursor.execute("INSERT INTO fault_history (device_id, severity, message) VALUES (?, ?, ?)", (device_id, severity, message))
     return True
 
 def resolve_faults(cursor, device_id):
-    # FIXED: Pehle sirf DOWN wale resolve hote the, ab saare resolve honge jab device theek ho
     cursor.execute("SELECT fault_id, rule_id FROM faults WHERE device_id = ? AND status = 'open'", (device_id,))
     open_faults = cursor.fetchall()
     for fault_id, rule_id in open_faults:
@@ -170,7 +167,6 @@ def resolve_faults(cursor, device_id):
         log_rule_firing(cursor, "R10", device_id, "fired", "Device recovered, fault resolved")
 
 def resolve_single_fault(cursor, device_id, rule_id):
-    # Jab ek specific condition theek ho jaye (jaise Loss kam ho gaya) to sirf uska fault resolve karo
     cursor.execute("SELECT fault_id FROM faults WHERE device_id = ? AND rule_id = ? AND status = 'open'", (device_id, rule_id))
     row = cursor.fetchone()
     if row:
@@ -184,31 +180,56 @@ def update_hourly_summary(cursor, device_id, up):
         ON CONFLICT(device_id, hour_start) DO UPDATE SET up_count = up_count + excluded.up_count, down_count = down_count + excluded.down_count""",
         (device_id, 1 if up == 1 else 0, 1 if up == 0 else 0))
 
+def init_db(cur):
+    # FIXED: Pehle saari tables banao, phir ALTER karo. Fresh DB pe crash nahi hoga.
+    cur.execute("""CREATE TABLE IF NOT EXISTS devices (
+        device_id INTEGER PRIMARY KEY, device_name TEXT, ip_address TEXT,
+        device_type TEXT, vlan_id TEXT, status TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS rules (
+        rule_id TEXT PRIMARY KEY, rule_name TEXT, probable_cause TEXT,
+        recommended_action TEXT, verification_step TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER, icmp_status INTEGER,
+        latency_ms REAL, packet_loss_percent REAL, http_status INTEGER,
+        snmp_cpu_percent REAL, interface_status TEXT, port_status TEXT,
+        dns_status INTEGER, ip_address_assigned TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS faults (
+        fault_id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER, rule_id TEXT,
+        status TEXT, evidence TEXT, resolved_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS fault_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER, severity TEXT,
+        message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS rule_firings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id TEXT, device_id INTEGER,
+        result TEXT CHECK(result IN ('fired','resolved')), details TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS metrics_hourly (
+        device_id INTEGER, hour_start TEXT, avg_latency_ms REAL,
+        max_packet_loss REAL, up_count INTEGER, down_count INTEGER,
+        UNIQUE(device_id, hour_start))""")
+    # Purani DB ke liye safe ALTER - table ab bani hui hai isliye crash nahi hoga
+    cur.execute("PRAGMA table_info(metrics)")
+    cols = [r[1] for r in cur.fetchall()]
+    if "port_status" not in cols:
+        cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")
+    if "dns_status" not in cols:
+        cur.execute("ALTER TABLE metrics ADD COLUMN dns_status INTEGER")
+    if "ip_address_assigned" not in cols:
+        cur.execute("ALTER TABLE metrics ADD COLUMN ip_address_assigned TEXT")
+
 def main():
     ensure_routes()
     conn = sqlite3.connect(DB)
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS metrics_hourly (
-        device_id INTEGER, hour_start TEXT, avg_latency_ms REAL,
-        max_packet_loss REAL, up_count INTEGER, down_count INTEGER,
-        UNIQUE(device_id, hour_start))""")
-    cur.execute("PRAGMA table_info(metrics)")
-    cols = [r[1] for r in cur.fetchall()]
-    if "port_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")# Naya wala - SAHI
-try:
-    if "port_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")
-except Exception:
-    pass
-    if "dns_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN dns_status INTEGER")
-    if "ip_address_assigned" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN ip_address_assigned TEXT")
+    init_db(cur)
+    conn.commit()
 
     dns_ok = check_dns()
     dns_time = check_dns_time()
     state = load_state()
     arp_table = get_arp_table()
 
-    # R16 - Gateway Check (alag se, ek bar)
     gw_up, gw_lat, gw_loss = ping_ip(GATEWAY)
     if gw_up == 0:
         print(f"R16 CRITICAL: Gateway {GATEWAY} DOWN!", flush=True)
@@ -218,14 +239,13 @@ except Exception:
     cur.execute("SELECT device_id, device_name, ip_address, device_type, vlan_id FROM devices ORDER BY device_id")
     all_devices = cur.fetchall()
 
-    # Gateway device_id dhoondo taake R16 ka fault sirf uspe bane - FIXED
     gateway_device_id = None
     for d in all_devices:
         if d[2] == GATEWAY:
             gateway_device_id = d[0]
             break
     if gateway_device_id is None and len(all_devices) > 0:
-        gateway_device_id = all_devices[0][0]  # fallback: pehla device (Router)
+        gateway_device_id = all_devices[0][0]
 
     seen_ips = {}
     devices = []
@@ -234,7 +254,6 @@ except Exception:
         if "GW" in name:
             continue
         if ip in seen_ips:
-            # R14 - Duplicate IP
             prev_id = seen_ips[ip]
             print(f"R14 DUPLICATE IP: {name} [{ip}] duplicate of device {prev_id}", flush=True)
             create_or_update_fault(cur, device_id, "R14", f"Duplicate IP {ip} already used by device {prev_id}", f"[R14-Critical] {name} Duplicate IP {ip}", "Critical")
@@ -243,7 +262,6 @@ except Exception:
         seen_ips[ip] = device_id
         devices.append(d)
 
-    # R23 - Unauthorized Device - ARP me hai lekin DB me nahi
     known_ips = set(seen_ips.keys())
     for arp_ip, mac in arp_table.items():
         if arp_ip.startswith("192.168.") and arp_ip not in known_ips and arp_ip != MY_IP and arp_ip != GATEWAY:
@@ -252,7 +270,6 @@ except Exception:
 
     print(f"\n--- Monitoring {len(devices)} targets | DNS: {'OK' if dns_ok else 'FAIL'} ({dns_time}ms) | GW: {'UP' if gw_up else 'DOWN'} ---", flush=True)
 
-    # FIXED R16: Gateway down hai to sirf gateway wale device pe 1 fault banao, har device pe nahi
     if gw_up == 0 and gateway_device_id is not None:
         create_or_update_fault(cur, gateway_device_id, "R16", f"Gateway {GATEWAY} unreachable - Ping failed", f"[R16-Critical] Gateway {GATEWAY} DOWN", "Critical")
         log_rule_firing(cur, "R16", gateway_device_id, "fired", "Gateway unreachable")
@@ -269,7 +286,6 @@ except Exception:
         interface_status = status
         print(f"{status} {name} [{ip}] latency={latency} loss={loss}% HTTP={http_status} CPU={snmp_cpu} MEM={snmp_mem}", flush=True)
 
-        # R09 - Flapping detection
         key = str(device_id)
         prev = state.get(key, {"last": status, "flaps": 0})
         if prev["last"] != status:
@@ -298,7 +314,6 @@ except Exception:
                 print(f"  -> FAULT: {rule_id} - {name} - {cause}", flush=True)
             else:
                 log_rule_firing(cur, rule_id, device_id, "fired", "Fault already open, duplicate suppressed (R15)")
-
             if device_type in ("switch", "core_switch"):
                 create_or_update_fault(cur, device_id, "R12", f"Port DOWN because {name} DOWN", f"[R12-Critical] {name} Port DOWN", "Critical")
                 log_rule_firing(cur, "R12", device_id, "fired", "Port down with device")
@@ -308,43 +323,33 @@ except Exception:
             if device_type == "pc":
                 create_or_update_fault(cur, device_id, "R05", f"PC {name} DOWN - IP {ip} not responding, DHCP maybe failed", f"[R05-Critical] {name} DHCP/IP Failed", "Critical")
                 log_rule_firing(cur, "R05", device_id, "fired", "DHCP check failed with DOWN")
-
         else:
-            # Device UP hai - FIXED: Saare DOWN wale faults resolve karo
             resolve_faults(cur, device_id)
-
-            # R02 - Packet Loss - theek hone pe auto-resolve
             if loss > 50:
                 create_or_update_fault(cur, device_id, "R02", f"Packet Loss {loss}% > 50%", f"[R02-Warning] {name} High Packet Loss {loss}%", "Warning")
                 log_rule_firing(cur, "R02", device_id, "fired", f"Loss {loss}%")
             else:
                 resolve_single_fault(cur, device_id, "R02")
-            # R03 - Latency
             if latency is not None and latency > 100:
                 create_or_update_fault(cur, device_id, "R03", f"Latency {latency}ms > 100ms", f"[R03-Warning] {name} High Latency {latency}ms", "Warning")
                 log_rule_firing(cur, "R03", device_id, "fired", f"Latency {latency}ms")
             else:
                 resolve_single_fault(cur, device_id, "R03")
-            # R11 - Bandwidth
             if latency is not None and latency > 200 and loss > 20:
                 create_or_update_fault(cur, device_id, "R11", f"Latency {latency}ms + Loss {loss}% = Link saturated", f"[R11-Warning] {name} Link Utilization High", "Warning")
                 log_rule_firing(cur, "R11", device_id, "fired", "Link saturated")
             else:
                 resolve_single_fault(cur, device_id, "R11")
-            # R09 - Flapping
             if prev.get("flaps", 0) >= 3:
                 create_or_update_fault(cur, device_id, "R09", f"Flapped {prev['flaps']} times - UP/DOWN loop", f"[R09-Warning] {name} Interface Flapping", "Warning")
                 log_rule_firing(cur, "R09", device_id, "fired", f"Flaps {prev['flaps']}")
                 state[key]["flaps"] = 0
-            # R13 - VLAN
             if device_type in ("switch", "core_switch", "pc") and (vlan_id is None or vlan_id == ""):
                 create_or_update_fault(cur, device_id, "R13", f"VLAN ID missing for {name}", f"[R13-Warning] {name} VLAN Mismatch / Not Assigned", "Warning")
                 log_rule_firing(cur, "R13", device_id, "fired", "VLAN missing")
-            # R22 - Ping UP HTTP DOWN
             if device_type == "server" and http_status == 0:
                 create_or_update_fault(cur, device_id, "R22", "Ping UP but HTTP 0 - Service down", f"[R22-Critical] {name} Ping UP but HTTP DOWN - Restart service", "Critical")
                 log_rule_firing(cur, "R22", device_id, "fired", "HTTP down")
-            # R04 - HTTP Error
             if device_type == "server" and http_status is not None and http_status != 0 and http_status != 200:
                 create_or_update_fault(cur, device_id, "R04", f"HTTP Status {http_status} != 200", f"[R04-Critical] {name} HTTP Error {http_status}", "Critical")
                 log_rule_firing(cur, "R04", device_id, "fired", f"HTTP {http_status}")
@@ -352,52 +357,46 @@ except Exception:
                 if device_type == "server":
                     resolve_single_fault(cur, device_id, "R04")
                     resolve_single_fault(cur, device_id, "R22")
-            # R19 - CPU High
             if snmp_cpu is not None and snmp_cpu > 85:
                 create_or_update_fault(cur, device_id, "R19", f"SNMP CPU {snmp_cpu}% > 85%", f"[R19-Warning] {name} High CPU {snmp_cpu}%", "Warning")
                 log_rule_firing(cur, "R19", device_id, "fired", f"CPU {snmp_cpu}%")
             else:
                 resolve_single_fault(cur, device_id, "R19")
-            # R20 - Memory High - FIXED % wala
             if snmp_mem is not None and snmp_mem > 85:
                 create_or_update_fault(cur, device_id, "R20", f"SNMP Memory {snmp_mem}% > 85%", f"[R20-Warning] {name} High Memory {snmp_mem}%", "Warning")
                 log_rule_firing(cur, "R20", device_id, "fired", f"MEM {snmp_mem}%")
             else:
                 resolve_single_fault(cur, device_id, "R20")
-            # FIXED R21 - Ab har bar log nahi hoga. EVE-NG me temp sensor nahi hai, isliye skip.
-            # Agar kabhi SNMP temp mile to yahan check karenge, warna DB nahi bharenge.
-            # R17 - DNS Failure
             if dns_ok == 0:
                 create_or_update_fault(cur, device_id, "R17", "Ping UP but DNS resolve failed", f"[R17-Critical] DNS Failure - Ping UP but name not resolving", "Critical")
                 log_rule_firing(cur, "R17", device_id, "fired", "DNS failed")
             else:
                 resolve_single_fault(cur, device_id, "R17")
-            # R18 - Slow DNS
             if dns_time is not None and dns_time > 2000:
                 create_or_update_fault(cur, device_id, "R18", f"DNS Time {dns_time}ms > 2000ms", f"[R18-Warning] Slow DNS {dns_time}ms", "Warning")
                 log_rule_firing(cur, "R18", device_id, "fired", f"Slow DNS {dns_time}ms")
             else:
                 resolve_single_fault(cur, device_id, "R18")
-            # R05 - DHCP check - PC UP hai lekin ARP me nahi
+                        # R05 - DHCP check - PC UP hai lekin ARP me nahi
             if device_type == "pc" and ip not in arp_table:
-                create_or_update_fault(cur, device_id, "R05", f"PC {name} UP but not in ARP - IP {ip} not assigned / DHCP failed", f"[R05-Warning] {name} DHCP Failed - No ARP entry", "Warning")
-                log_rule_firing(cur, "R05", device_id, "fired", "No ARP entry")
-             else:
-            if device_type == "pc":
-                 resolve_single_fault(cur, device_id, "R05")
-            # R25 - Config Change - sirf jab flap hua ho tabhi log karo, har bar nahi
-            if prev.get("flaps", 0) > 0:
-                log_rule_firing(cur, "R25", device_id, "checked", f"Config/State change detected - status flapped")
+                create_or_update_fault(cur, device_id, "R05", f"PC {name} UP but not in ARP - IP {ip} not assigned / DHCP failed", f"[R05-Warning] {name} DHCP Failed - Not in ARP", "Warning")
+                log_rule_firing(cur, "R05", device_id, "fired", "DHCP not in ARP")
+            else:
+                if device_type == "pc":
+                    resolve_single_fault(cur, device_id, "R05")
 
     save_state(state)
     conn.commit()
     conn.close()
-    print(f"Saved monitoring cycle to {DB} - R01 to R25 checked", flush=True)
+    print("Saved monitoring cycle", flush=True)
 
 if __name__ == "__main__":
-    if "--once" in sys.argv: main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--once":
+        main()
     else:
         while True:
-            main()
-            print("Waiting 60 seconds... Press Ctrl+C to stop", flush=True)
+            try:
+                main()
+            except Exception as e:
+                print(f"Monitor loop error: {e}", flush=True)
             time.sleep(CHECK_INTERVAL)
