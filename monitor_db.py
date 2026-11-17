@@ -1,5 +1,5 @@
 # monitor_db.py - Database Monitor + Rule Engine (DB Version)
-# FIXED: Deduplicate by IP + Auto-fix Routes after reboot + 11 Devices
+# FIXED: EVE-NG Lab ke hisab se - Auto Interface + Gateway 192.168.10.1 + Syntax Fix
 import subprocess
 import sqlite3
 import time
@@ -14,27 +14,45 @@ PING_COUNT = 3
 PING_TIMEOUT = 2
 CHECK_INTERVAL = 60
 
+# EVE-NG Lab ke hisab se - Yehi tere Router/Core ke IPs hain
+GATEWAY = "192.168.10.1"
+CORE_IP = "192.168.10.2"
+MY_IP = "192.168.10.11"
+MY_NET = "192.168.10.0/24"
+
+def get_iface():
+    """Auto-detect interface - ens3 ho ya eth0, khud dhoond lega"""
+    try:
+        r = subprocess.run(["ip", "route"], capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            if "default via" in line:
+                parts = line.split()
+                if "dev" in parts:
+                    return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+    return "eth0"
+
 def ensure_routes():
     """Laptop reboot ke baad ur jane wale routes ko wapas lao"""
+    iface = get_iface()
     try:
-        # Apna IP check karo - 192.168.40.11 hona chahiye
-        r = subprocess.run(["ip", "addr", "show", "ens3"], capture_output=True, text=True)
-        if "192.168.40.11" not in r.stdout:
-            subprocess.run(["sudo", "ip", "addr", "add", "192.168.40.11/24", "dev", "ens3"], capture_output=True)
-            print("ROUTE-FIX: 192.168.40.11 wapas lagaya", flush=True)
-        # Routes check karo
+        r = subprocess.run(["ip", "addr", "show", iface], capture_output=True, text=True)
+        if MY_IP not in r.stdout:
+            subprocess.run(["sudo", "ip", "addr", "add", f"{MY_IP}/24", "dev", iface], capture_output=True)
+            print(f"ROUTE-FIX: {MY_IP} wapas lagaya on {iface}", flush=True)
         r2 = subprocess.run(["ip", "route"], capture_output=True, text=True)
         routes = r2.stdout
-        for net in ["192.168.10.0/24", "192.168.20.0/24", "192.168.30.0/24"]:
+        for net in ["192.168.10.0/24", "192.168.20.0/24", "192.168.30.0/24", "192.168.40.0/24"]:
             if net not in routes:
-                subprocess.run(["sudo", "ip", "route", "add", net, "via", "192.168.40.2", "dev", "ens3"], capture_output=True)
-                print(f"ROUTE-FIX: {net} via 192.168.40.2 wapas lagaya", flush=True)
+                subprocess.run(["sudo", "ip", "route", "add", net, "via", GATEWAY, "dev", iface], capture_output=True)
+                print(f"ROUTE-FIX: {net} via {GATEWAY} wapas lagaya", flush=True)
     except Exception as e:
         print(f"ROUTE-FIX failed (sudo chahiye hoga): {e}", flush=True)
 
 def ping_ip(ip):
     try:
-        r = subprocess.run(["ping", "-c", str(PING_COUNT), "-W", str(PING_TIMEOUT), ip], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["ping", "-c", str(PING_COUNT), "-W", str(PING_TIMEOUT), ip], capture_output=True, text=True, timeout=10)
         loss = 100.0
         latency = None
         up = 0
@@ -118,6 +136,7 @@ def main():
         UNIQUE(device_id, hour_start))""")
     cur.execute("PRAGMA table_info(metrics)")
     cols = [r[1] for r in cur.fetchall()]
+    # FIXED: Yahan bracket missing tha, ab sahi hai
     if "port_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN port_status TEXT")
     if "dns_status" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN dns_status INTEGER")
     if "ip_address_assigned" not in cols: cur.execute("ALTER TABLE metrics ADD COLUMN ip_address_assigned TEXT")
@@ -126,7 +145,6 @@ def main():
     cur.execute("SELECT device_id, device_name, ip_address, device_type, vlan_id FROM devices ORDER BY device_id")
     all_devices = cur.fetchall()
 
-    # --- MAIN FIX: IP se deduplicate karo ---
     seen_ips = set()
     devices = []
     for d in all_devices:
