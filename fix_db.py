@@ -1,4 +1,3 @@
-cat > fix_db.py << 'EOF'
 import sqlite3
 conn = sqlite3.connect("database.db")
 cur = conn.cursor()
@@ -18,6 +17,5 @@ devices = [
 ]
 cur.executemany("INSERT INTO devices (device_name, ip_address, device_type, vlan_id) VALUES (?,?,?,?)", devices)
 conn.commit()
-print(f"Done! {len(devices)} devices daal diye")
+print("Done! 11 devices daal diye")
 conn.close()
-EOF
